@@ -21,6 +21,7 @@ mod execution_buffer;
 mod health;
 mod observability;
 mod ops_events;
+mod portal;
 mod provider_accounts;
 mod proxies;
 mod query_budget;
