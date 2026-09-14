@@ -7,7 +7,6 @@ use super::AdminError;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WalletPolicy {
-    pub balance_enforced: bool,
     pub daily_limit_usd: String,
     pub weekly_limit_usd: String,
     pub max_concurrency: u32,

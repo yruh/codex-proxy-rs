@@ -6,7 +6,7 @@
 
 一个用户的全部密钥共享钱包和并发槽位，原有单密钥限制仍然生效。充值以 USD 记账；同一操作编号重复提交不会重复入账。管理员不能把已有密钥换绑给另一用户，历史归属保持不变。
 
-日上限在北京时间每天零点重置，周上限在北京时间周一零点重置。金额上限与并发上限为 0 时表示不限。余额限制默认关闭，升级不会自动停用既有用户。
+日上限在北京时间每天零点重置，周上限在北京时间周一零点重置。日／周金额上限与并发上限为 0 时表示不限。普通用户余额必须大于 0 才能开始新请求，余额为零或负数时拒绝调用，充值后恢复；此规则不能关闭。升级保留余额及流水，所有普通用户立即适用。
 
 限制在请求开始时检查，不预占未知的输出费用。已经开始的请求仍按最终费用结算，可能使余额变负或超过日／周上限；随后拒绝新请求。钱包消费从功能启用后的新请求开始累计，不追溯扣除历史调用。本地直连数据只进入统计，不扣普通用户余额。
 
@@ -19,7 +19,7 @@
 | POST | `/api/portal/password` | `{oldPassword,newPassword}`，至少 12 字节的新密码 |
 | GET | `/api/portal/wallet` | 自己的钱包和最近 100 笔流水 |
 | GET | `/api/admin/portal/wallet?userId=...` | 指定用户的钱包和流水 |
-| POST | `/api/admin/portal/wallet/policy` | `{userId,policy:{balanceEnforced,dailyLimitUsd,weeklyLimitUsd,maxConcurrency}}` |
+| POST | `/api/admin/portal/wallet/policy` | `{userId,policy:{dailyLimitUsd,weeklyLimitUsd,maxConcurrency}}` |
 | POST | `/api/admin/portal/wallet/credit` | `{userId,operationId,amount,note}`；操作编号为 UUID，金额为正十进制字符串 |
 
 ## 双端统计

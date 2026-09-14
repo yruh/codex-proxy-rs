@@ -61,11 +61,24 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
         sqlx::query("insert into client_api_keys(id,name,key,created_at,updated_at) values($1,$1,$2,now(),now())").bind(key).bind(format!("sk_{}",key.repeat(43))).execute(&database.pool).await.unwrap();
         store.assign_key(key, "student").await.unwrap();
     }
+    let admission = PgPortalAdmission::new(database.pool.clone(), Arc::new(AllowAdmission));
+    let request = |key: &str, id: &str| ClientAdmissionRequest {
+        model_request_id: ModelRequestId::new(id).unwrap(),
+        client_api_key_id: ClientApiKeyId::new(key).unwrap(),
+        lease_ttl: StdDuration::from_secs(60),
+        limits: Default::default(),
+    };
+    let one = request("one", "req_one");
+    let two = request("two", "req_two");
+    // 未充值用户即使未设置任何金额上限，也不能开始调用。
+    assert_eq!(
+        admission.admit(one.clone()).await.unwrap(),
+        ClientAdmissionDecision::Rejected(ClientAdmissionRejection::RateLimited)
+    );
     store
         .set_wallet_policy(
             "student",
             WalletPolicy {
-                balance_enforced: true,
                 daily_limit_usd: "0".into(),
                 weekly_limit_usd: "0".into(),
                 max_concurrency: 1,
@@ -73,6 +86,10 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        admission.admit(two.clone()).await.unwrap(),
+        ClientAdmissionDecision::Rejected(ClientAdmissionRejection::RateLimited)
+    );
     store
         .credit_wallet("student", "credit-a", "1", "test")
         .await
@@ -87,15 +104,6 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
             .await
             .is_err()
     );
-    let admission = PgPortalAdmission::new(database.pool.clone(), Arc::new(AllowAdmission));
-    let request = |key: &str, id: &str| ClientAdmissionRequest {
-        model_request_id: ModelRequestId::new(id).unwrap(),
-        client_api_key_id: ClientApiKeyId::new(key).unwrap(),
-        lease_ttl: StdDuration::from_secs(60),
-        limits: Default::default(),
-    };
-    let one = request("one", "req_one");
-    let two = request("two", "req_two");
     assert_eq!(
         admission.admit(one.clone()).await.unwrap(),
         ClientAdmissionDecision::Granted
@@ -132,6 +140,14 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
     assert_eq!(
         admission.admit(request("one", "req_three")).await.unwrap(),
         ClientAdmissionDecision::Rejected(ClientAdmissionRejection::RateLimited)
+    );
+    store
+        .credit_wallet("student", "credit-b", "2", "refill")
+        .await
+        .unwrap();
+    assert_eq!(
+        admission.admit(request("one", "req_four")).await.unwrap(),
+        ClientAdmissionDecision::Granted
     );
     assert!(
         store

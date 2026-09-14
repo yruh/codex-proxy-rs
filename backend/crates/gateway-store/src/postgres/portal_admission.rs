@@ -42,7 +42,7 @@ impl PgPortalAdmission {
             .execute(&mut *tx)
             .await
             .map_err(|_| ClientAdmissionError)?;
-        let row=sqlx::query("select w.max_concurrency,u.enabled,(w.balance_enforced and w.balance_usd<=0) as empty from portal_wallets w join portal_users u on u.id=w.user_id where w.user_id=$1 for update of w")
+        let row=sqlx::query("select w.max_concurrency,u.enabled,(w.balance_usd<=0) as empty from portal_wallets w join portal_users u on u.id=w.user_id where w.user_id=$1 for update of w")
             .bind(&owner).fetch_one(&mut *tx).await.map_err(|_|ClientAdmissionError)?;
         if !row.get::<bool, _>("enabled") || row.get::<bool, _>("empty") {
             return Ok(ClientAdmissionDecision::Rejected(

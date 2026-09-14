@@ -1,11 +1,31 @@
 <script setup lang="ts">
 import type { Account } from '@/api/modules/accounts'
+import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
+import { Download, Laptop, Plus, RefreshCw, Server, Sigma } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { getAccounts } from '@/api/modules/accounts'
 import { portalRequest } from '@/api/modules/portal'
+import BaseButton from '@/components/base/BaseButton.vue'
+import BaseCard from '@/components/base/BaseCard.vue'
+import FormItem from '@/components/base/BaseForm/FormItem.vue'
+import BaseInput from '@/components/base/BaseInput.vue'
+import BaseModal from '@/components/base/BaseModal/index.vue'
+import BasePageHeader from '@/components/base/BasePageHeader.vue'
+import BaseSelect from '@/components/base/BaseSelect.vue'
+import BaseTable from '@/components/base/BaseTable/index.vue'
 
 interface Daily { day: string, source: string, requests: number, inputTokens: string, outputTokens: string, cachedTokens: string, estimatedUsd: string | null, pricedRequests: number }
 interface Device { id: string, name: string, accountId: string, enabled: boolean, lastSyncAt: string | null }
+const showDevice = ref(false)
+const columns: BaseTableColumn<Daily>[] = [
+  { key: 'day', label: '日期', size: 'lg' },
+  { key: 'source', label: '来源', size: 'lg' },
+  { key: 'requests', label: '响应', kind: 'numeric' },
+  { key: 'inputTokens', label: '输入', kind: 'numeric' },
+  { key: 'cachedTokens', label: '缓存（含于输入）', kind: 'numeric', size: 'xl' },
+  { key: 'outputTokens', label: '输出', kind: 'numeric' },
+  { key: 'estimatedUsd', label: 'API 等价 USD', kind: 'numeric', size: 'lg' },
+]
 const rows = ref<Daily[]>([])
 const devices = ref<Device[]>([])
 const accounts = ref<Account[]>([])
@@ -97,6 +117,8 @@ async function action(work: () => Promise<void>) {
 }
 async function create() {
   await action(async () => {
+    if (!deviceAccount.value)
+      throw new Error('请选择绑定账号')
     const result = await portalRequest<{ token: string }>('/api/admin/sync/devices', { name: deviceName.value, accountId: deviceAccount.value })
     newToken.value = result.token
     await load()
@@ -112,240 +134,169 @@ onMounted(() => action(load))
 </script>
 
 <template>
-  <main class="combined">
-    <header><div><h1>双端合并统计</h1><p>本地直连与服务器代理分别记账，共享账号额度不相加。</p></div><span v-if="updated">更新于 {{ updated }}</span></header>
-    <p v-if="error" role="alert">
+  <div class="flex w-full min-w-0 flex-col gap-5">
+    <BasePageHeader title="双端合并统计" description="本地直连与服务器代理，一个视图掌握用量">
+      <template #actions>
+        <BaseButton :disabled="!loaded" @click="exportCsv">
+          <template #icon>
+            <Download :size="16" />
+          </template>导出明细
+        </BaseButton><BaseButton :loading="busy" @click="action(load)">
+          <template #icon>
+            <RefreshCw :size="16" />
+          </template>刷新
+        </BaseButton>
+      </template>
+    </BasePageHeader>
+    <p v-if="error && !showDevice" role="alert" class="rounded-cp bg-cp-error-container p-3 text-sm text-cp-error-on-container">
       {{ error }}；部分内容未加载，请重试。
     </p>
-    <div class="toolbar">
-      <label for="combined-account">上游账号<select id="combined-account" v-model="accountId" :disabled="busy" @change="action(load)"><option value="">全部账号</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select></label><label for="combined-period">时间<select id="combined-period" v-model="days" :disabled="busy" @change="action(load)"><option :value="1">最近一天</option><option :value="7">最近一周</option><option :value="30">最近一月</option><option :value="365">最近一年</option></select></label><button :disabled="busy" @click="action(load)">
-        刷新
-      </button>
-    </div>
-    <div class="toolbar">
-      <label for="combined-source">数据来源<select id="combined-source" v-model="sourceFilter"><option value="all">双端合计</option><option value="local">仅本地直连</option><option value="proxy">仅服务器代理</option></select></label>
-      <span>北京时间 · {{ days }} 天 · {{ activeDays }} 个活跃日</span><button :disabled="!loaded" @click="exportCsv">
-        导出当前明细
-      </button>
-    </div>
-    <div class="cards">
-      <section v-for="card in cards" :key="card.source">
-        <h2>{{ label(card.source) }}</h2><strong class="number">{{ loaded ? card.tokens : '—' }}</strong><p>tokens · {{ loaded ? card.requests : '—' }} 次响应</p><p>API 等价 {{ card.priced ? `$${card.usd.toFixed(4)}` : '—' }} · 已计价 {{ loaded ? `${card.priced}/${card.requests}` : '—' }}</p>
-      </section>
-    </div>
-    <section>
-      <div class="toolbar">
-        <h2>双端使用趋势</h2><label for="trend-metric">指标<select id="trend-metric" v-model="metric"><option value="tokens">Tokens</option><option value="cost">API 等价 USD</option><option value="requests">响应次数</option></select></label>
-      </div>
-      <p>绿色为本地直连，蓝色为服务器代理。点击某天查看明细；未计价请求不计入费用趋势。</p>
-      <div class="trend" role="group" aria-label="每日用量趋势">
-        <button v-for="day in calendar" :key="day.day" class="bar" :title="`${day.day} · 本地 ${metricLabel(day.local)} · 代理 ${metricLabel(day.proxy)}`" :aria-label="`${day.day} ${metricLabel(day.local + day.proxy)}`" @click="selectedDay = selectedDay === day.day ? '' : day.day">
-          <span class="proxy-bar" :style="{ height: `${day.proxy / peak * 160}px` }" /><span class="local-bar" :style="{ height: `${day.local / peak * 160}px` }" />
-        </button>
-      </div>
-      <div class="toolbar">
-        <span>{{ calendar[0]?.day }}</span><span>{{ calendar.at(-1)?.day }}</span>
-      </div>
-      <h3>用量热力图</h3><div class="heatmap">
-        <button v-for="day in calendar" :key="day.day" :aria-label="`${day.day} ${metricLabel(day.local + day.proxy)}`" :title="`${day.day} · ${metricLabel(day.local + day.proxy)}`" :style="{ background: day.local + day.proxy ? `rgba(38, 145, 101, ${0.2 + 0.8 * (day.local + day.proxy) / peak})` : 'var(--cp-color-bg-layout)' }" @click="selectedDay = selectedDay === day.day ? '' : day.day" />
-      </div>
-    </section>
-    <section>
-      <h2>共享账号额度</h2><p>这是上游账号的统一额度，两端共用。分别展示每个账号，不把额度百分比相加。</p>
-      <div v-for="account in scopedAccounts" :key="account.id" class="quota-account">
-        <h3>{{ account.name }}</h3><p>观测时间 {{ account.quota.refreshedAtDisplay }}</p>
-        <div v-for="window in account.quota.windows" :key="window.key">
-          <div class="toolbar">
-            <span>{{ window.labelDisplay }} · {{ window.windowLabelDisplay }}</span><strong>{{ window.usedPercentDisplay }}</strong>
-          </div><div class="quota-meter" role="progressbar" :aria-label="window.labelDisplay" :aria-valuenow="window.usedPercent ?? undefined" :aria-valuemin="0" :aria-valuemax="100">
-            <span :style="{ width: `${Math.max(0, Math.min(100, window.usedPercent ?? 0))}%` }" />
-          </div><p>重置 {{ window.resetAtDisplay }}</p>
-        </div>
-        <p v-if="!account.quota.windows.length">
-          暂无额度观测数据
+    <BaseCard padding="compact">
+      <div class="flex flex-wrap items-end gap-3">
+        <FormItem label="上游账号" class="min-w-48 flex-1">
+          <BaseSelect v-model="accountId" :disabled="busy" :options="[{ label: '全部账号', value: '' }, ...accounts.map(a => ({ label: a.name, value: a.id }))]" @update:model-value="action(load)" />
+        </FormItem>
+        <FormItem label="时间范围" class="min-w-36">
+          <BaseSelect :model-value="String(days)" :disabled="busy" :options="[{ label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }, { label: '最近一年', value: '365' }]" @update:model-value="days = Number($event); action(load)" />
+        </FormItem>
+        <FormItem label="数据来源" class="min-w-40">
+          <BaseSelect v-model="sourceFilter" :options="[{ label: '双端合计', value: 'all' }, { label: '本地直连', value: 'local' }, { label: '服务器代理', value: 'proxy' }]" />
+        </FormItem>
+        <p class="pb-2 text-xs text-cp-text-tertiary">
+          北京时间 <span v-if="updated">· 更新于 {{ updated }}</span>
         </p>
       </div>
-    </section>
-    <section>
-      <div class="toolbar">
-        <h2>{{ selectedDay || '每日' }}用量明细</h2><button v-if="selectedDay" @click="selectedDay = ''">
-          显示全部日期
+    </BaseCard>
+    <div class="grid gap-4 md:grid-cols-3">
+      <BaseCard v-for="card in cards" :key="card.source">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold text-cp-text-secondary">{{ label(card.source) }}</span><component :is="card.source === 'local' ? Laptop : card.source === 'proxy' ? Server : Sigma" :size="19" class="text-cp-primary" />
+        </div>
+        <p class="mt-4 break-all text-3xl font-bold tabular-nums">
+          {{ loaded ? card.tokens : '—' }} <span class="text-xs font-normal text-cp-text-tertiary">tokens</span>
+        </p>
+        <div class="mt-4 flex flex-wrap justify-between gap-2 text-xs text-cp-text-secondary">
+          <span>{{ loaded ? card.requests.toLocaleString() : '—' }} 次响应</span><span>API 等价 {{ card.priced ? `${card.usd.toFixed(4)} USD` : '—' }}</span>
+        </div>
+        <p class="mt-2 text-xs text-cp-text-tertiary">
+          已计价 {{ loaded ? `${card.priced}/${card.requests}` : '—' }}
+        </p>
+      </BaseCard>
+    </div>
+    <BaseCard title="用量趋势" :description="`${days} 天内 · ${activeDays} 个活跃日`">
+      <template #actions>
+        <BaseSelect v-model="metric" :options="[{ label: 'Tokens', value: 'tokens' }, { label: 'API 等价 USD', value: 'cost' }, { label: '响应次数', value: 'requests' }]" aria-label="趋势指标" />
+      </template>
+      <div class="mb-4 flex flex-wrap gap-4 text-xs text-cp-text-secondary">
+        <span class="flex items-center gap-2"><i class="size-2 rounded-full bg-cp-success" />本地直连</span><span class="flex items-center gap-2"><i class="size-2 rounded-full bg-cp-info" />服务器代理</span><span class="text-cp-text-tertiary">点击日期筛选明细</span>
+      </div>
+      <div class="flex h-48 items-end gap-1 overflow-x-auto" role="group" aria-label="每日用量趋势">
+        <button v-for="day in calendar" :key="day.day" type="button" class="flex h-full min-w-2 flex-1 flex-col justify-end rounded-t-sm bg-transparent outline-offset-2 hover:bg-cp-fill-quaternary focus-visible:outline-2 focus-visible:outline-cp-control-outline" :title="`${day.day} · 本地 ${metricLabel(day.local)} · 代理 ${metricLabel(day.proxy)}`" :aria-label="`${day.day} ${metricLabel(day.local + day.proxy)}`" :aria-pressed="selectedDay === day.day" @click="selectedDay = selectedDay === day.day ? '' : day.day">
+          <span class="block w-full rounded-t-sm bg-cp-info" :style="{ height: `${day.proxy / peak * 170}px` }" /><span class="block w-full bg-cp-success" :style="{ height: `${day.local / peak * 170}px` }" />
         </button>
-      </div><div class="scroll">
-        <table>
-          <thead><tr><th>日期</th><th>来源</th><th>响应</th><th>输入</th><th>缓存（含于输入）</th><th>输出</th><th>API 等价 USD</th></tr></thead><tbody>
-            <tr v-for="row in filteredRows" :key="`${row.day}-${row.source}`">
-              <td>{{ row.day }}</td><td>{{ label(row.source) }}</td><td>{{ row.requests }}</td><td>{{ BigInt(row.inputTokens).toLocaleString() }}</td><td>{{ BigInt(row.cachedTokens).toLocaleString() }}</td><td>{{ BigInt(row.outputTokens).toLocaleString() }}</td><td>{{ row.estimatedUsd ?? '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div><p v-if="!filteredRows.length">
-        {{ loaded ? '当前范围没有已同步的用量。' : '用量尚未加载。' }}
+      </div>
+      <div class="mt-2 flex justify-between text-xs text-cp-text-tertiary">
+        <span>{{ calendar[0]?.day }}</span><span>{{ calendar.at(-1)?.day }}</span>
+      </div>
+      <div class="mt-6 flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-sm font-semibold">
+          每日活跃度
+        </h3><span class="text-xs text-cp-text-tertiary">颜色越深，用量越多 · 未计价记录不计入费用趋势</span>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-1.5">
+        <button v-for="day in calendar" :key="day.day" type="button" class="size-4 rounded-sm outline-offset-2 focus-visible:outline-2 focus-visible:outline-cp-control-outline" :class="selectedDay === day.day ? 'ring-2 ring-cp-primary' : ''" :aria-pressed="selectedDay === day.day" :aria-label="`${day.day} ${metricLabel(day.local + day.proxy)}`" :title="`${day.day} · ${metricLabel(day.local + day.proxy)}`" :style="{ background: day.local + day.proxy ? `color-mix(in srgb, var(--cp-color-success) ${22 + 78 * (day.local + day.proxy) / peak}%, var(--cp-color-success-container))` : 'var(--cp-color-fill-tertiary)' }" @click="selectedDay = selectedDay === day.day ? '' : day.day" />
+      </div>
+    </BaseCard>
+    <BaseCard :title="`${selectedDay || '每日'}用量明细`" description="输入包含缓存；本地与代理分别记账后合计">
+      <template v-if="selectedDay" #actions>
+        <BaseButton size="sm" @click="selectedDay = ''">
+          清除日期筛选
+        </BaseButton>
+      </template>
+      <BaseTable :columns="columns" :rows="filteredRows" :row-key="row => `${row.day}-${row.source}`" :loading="busy && !loaded" :empty-text="loaded ? '当前范围没有已同步用量' : '用量尚未加载'">
+        <template #source="{ row }">
+          <span class="rounded-cp-sm px-2 py-1 text-xs font-semibold" :class="row.source === 'local' ? 'bg-cp-success-container text-cp-success-on-container' : 'bg-cp-info-container text-cp-info-on-container'">{{ label(row.source) }}</span>
+        </template>
+      </BaseTable>
+    </BaseCard>
+    <BaseCard title="共享账号额度" description="两端共用上游额度，每个账号单独展示">
+      <p v-if="!scopedAccounts.length" class="py-6 text-center text-sm text-cp-text-tertiary">
+        暂无账号数据
       </p>
-    </section>
-    <section>
-      <h2>同步设备</h2><p>设备绑定本机登录的同一个上游账号。停用设备不会删除历史记录。</p><div v-for="d in devices" :key="d.id" class="toolbar">
-        <span>{{ d.name }} · {{ d.enabled ? '启用' : '停用' }} · {{ d.lastSyncAt ? `最后同步 ${new Date(d.lastSyncAt).toLocaleString()}` : '尚未同步' }}</span><button :disabled="busy" @click="toggle(d)">
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div v-for="account in scopedAccounts" :key="account.id" class="rounded-cp bg-cp-fill-quaternary p-4">
+          <h3 class="font-semibold">
+            {{ account.name }}
+          </h3><p class="mt-1 text-xs text-cp-text-tertiary">
+            观测于 {{ account.quota.refreshedAtDisplay }}
+          </p>
+          <div v-for="window in account.quota.windows" :key="window.key" class="mt-4">
+            <div class="mb-2 flex justify-between gap-3 text-xs">
+              <span class="text-cp-text-secondary">{{ window.labelDisplay }} · {{ window.windowLabelDisplay }}</span><strong>{{ window.usedPercentDisplay }}</strong>
+            </div>
+            <div class="h-1.5 overflow-hidden rounded-full bg-cp-fill-tertiary" role="progressbar" :aria-label="window.labelDisplay" :aria-valuenow="window.usedPercent ?? undefined" :aria-valuemin="0" :aria-valuemax="100">
+              <div class="h-full rounded-full bg-cp-primary" :style="{ width: `${Math.max(0, Math.min(100, window.usedPercent ?? 0))}%` }" />
+            </div>
+            <p class="mt-2 text-xs text-cp-text-tertiary">
+              重置 {{ window.resetAtDisplay }}
+            </p>
+          </div>
+          <p v-if="!account.quota.windows.length" class="mt-4 text-xs text-cp-text-tertiary">
+            暂无额度观测
+          </p>
+        </div>
+      </div>
+    </BaseCard>
+    <BaseCard title="同步设备" description="关联本机登录的上游账号，停用保留历史用量">
+      <template #actions>
+        <BaseButton @click="showDevice = true; error = ''; newToken = ''">
+          <template #icon>
+            <Plus :size="16" />
+          </template>添加设备
+        </BaseButton>
+      </template>
+      <p v-if="!devices.length" class="py-6 text-center text-sm text-cp-text-tertiary">
+        尚未添加同步设备
+      </p>
+      <div v-for="d in devices" :key="d.id" class="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-cp bg-cp-fill-quaternary p-4">
+        <div class="flex items-center gap-3">
+          <Laptop class="text-cp-text-tertiary" :size="20" /><div>
+            <p class="font-semibold">
+              {{ d.name }} <span class="ml-2 text-xs font-normal" :class="d.enabled ? 'text-cp-success-text' : 'text-cp-text-tertiary'">{{ d.enabled ? '已启用' : '已停用' }}</span>
+            </p><p class="mt-1 text-xs text-cp-text-tertiary">
+              {{ d.lastSyncAt ? `最后同步 ${new Date(d.lastSyncAt).toLocaleString()}` : '等待首次同步' }}
+            </p>
+          </div>
+        </div><BaseButton size="sm" :disabled="busy" @click="toggle(d)">
           {{ d.enabled ? '停用' : '启用' }}
-        </button>
+        </BaseButton>
       </div>
-      <form class="toolbar" @submit.prevent="create">
-        <label for="device-name">设备名称<input id="device-name" v-model="deviceName" required maxlength="100"></label><label for="device-account">绑定账号<select id="device-account" v-model="deviceAccount" required><option value="" disabled>选择本机使用的账号</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select></label><button :disabled="busy">
+    </BaseCard>
+    <BaseModal v-model="showDevice" title="添加同步设备" description="绑定本机 Codex 登录的同一个上游账号" :dismissible="!busy">
+      <p v-if="error" role="alert" class="mb-4 text-sm text-cp-error-text">
+        {{ error }}
+      </p>
+      <div v-if="newToken" class="space-y-4">
+        <p class="text-sm text-cp-text-secondary">
+          凭据仅本次显示，请复制到 Lens 同步设置。
+        </p><code class="block break-all rounded-cp bg-cp-fill-tertiary p-4 text-sm">{{ newToken }}</code><BaseButton @click="newToken = ''; showDevice = false">
+          已保存，关闭
+        </BaseButton>
+      </div>
+      <form v-else id="create-device" class="space-y-5" @submit.prevent="create">
+        <FormItem label="设备名称" required>
+          <BaseInput v-model="deviceName" maxlength="100" />
+        </FormItem><FormItem label="绑定账号" required>
+          <BaseSelect v-model="deviceAccount" :options="accounts.map(a => ({ label: a.name, value: a.id }))" placeholder="选择本机使用的账号" />
+        </FormItem>
+      </form>
+      <template v-if="!newToken" #footer>
+        <BaseButton :disabled="busy" @click="showDevice = false">
+          取消
+        </BaseButton><BaseButton type="submit" form="create-device" variant="primary" :loading="busy">
           创建同步凭据
-        </button>
-      </form><div v-if="newToken">
-        <p>新凭据仅本次显示，用于配置 Lens 同步。</p><code>{{ newToken }}</code><button @click="newToken = ''">
-          隐藏
-        </button>
-      </div>
-    </section>
-  </main>
+        </BaseButton>
+      </template>
+    </BaseModal>
+  </div>
 </template>
-
-<style scoped>
-.trend {
-  display: flex;
-  align-items: end;
-  height: 180px;
-  gap: 3px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--cp-color-border);
-}
-.bar {
-  display: flex;
-  flex-direction: column;
-  justify-content: end;
-  flex: 1;
-  min-width: 6px;
-  height: 175px;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-}
-.bar span {
-  display: block;
-  width: 100%;
-  min-height: 1px;
-}
-.local-bar {
-  background: #269165;
-}
-.proxy-bar {
-  background: #508cd5;
-}
-.heatmap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 12px;
-}
-.heatmap button {
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border-radius: 3px;
-}
-.quota-account {
-  padding: 16px 0;
-  border-bottom: 1px solid var(--cp-color-border);
-}
-.quota-meter {
-  width: 100%;
-  height: 9px;
-  background: var(--cp-color-bg-layout);
-}
-.quota-meter span {
-  display: block;
-  height: 9px;
-  background: #269165;
-}
-.combined {
-  padding: 28px;
-  color: var(--cp-color-text);
-}
-header,
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.toolbar {
-  justify-content: flex-start;
-  margin: 16px 0;
-}
-h1 {
-  font-size: 26px;
-  font-weight: 650;
-}
-h2 {
-  font-size: 18px;
-  font-weight: 600;
-}
-p {
-  color: var(--cp-color-text-secondary);
-  margin: 10px 0;
-}
-section {
-  background: var(--cp-color-bg-container);
-  border-radius: 14px;
-  padding: 22px;
-  margin-top: 22px;
-}
-.cards {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-.number {
-  display: block;
-  font-size: 28px;
-  margin-top: 18px;
-  overflow-wrap: anywhere;
-}
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-input,
-select,
-button {
-  padding: 9px 12px;
-  border: 1px solid var(--cp-color-border);
-  border-radius: 8px;
-  background: var(--cp-color-bg-container);
-  color: inherit;
-}
-button {
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.5;
-}
-.scroll {
-  overflow: auto;
-}
-table {
-  width: 100%;
-  white-space: nowrap;
-}
-td,
-th {
-  padding: 12px;
-  text-align: left;
-  border-bottom: 1px solid var(--cp-color-border);
-}
-code {
-  overflow-wrap: anywhere;
-}
-@media (max-width: 800px) {
-  .cards {
-    grid-template-columns: 1fr;
-  }
-  .combined {
-    padding: 16px;
-  }
-}
-</style>

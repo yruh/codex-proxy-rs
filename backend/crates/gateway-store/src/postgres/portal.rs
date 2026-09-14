@@ -46,7 +46,7 @@ impl PortalStore for PgPortalStore {
         user_id: &str,
     ) -> AdminStoreResult<gateway_admin::model::portal::PortalWallet> {
         use gateway_admin::model::portal::{PortalWallet, WalletPolicy};
-        let r = sqlx::query("select u.id,coalesce(w.balance_usd,0)::text as balance,coalesce(w.total_spent_usd,0)::text as spent,coalesce(w.balance_enforced,false) as enforced,coalesce(w.daily_limit_usd,0)::text as daily_limit,coalesce(w.weekly_limit_usd,0)::text as weekly_limit,coalesce(w.max_concurrency,0) as concurrency,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('day',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as daily_used,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('week',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as weekly_used,(select count(*) from portal_user_requests where user_id=u.id and not released and expires_at>now()) as active from portal_users u left join portal_wallets w on w.user_id=u.id where u.id=$1")
+        let r = sqlx::query("select u.id,coalesce(w.balance_usd,0)::text as balance,coalesce(w.total_spent_usd,0)::text as spent,coalesce(w.daily_limit_usd,0)::text as daily_limit,coalesce(w.weekly_limit_usd,0)::text as weekly_limit,coalesce(w.max_concurrency,0) as concurrency,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('day',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as daily_used,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('week',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as weekly_used,(select count(*) from portal_user_requests where user_id=u.id and not released and expires_at>now()) as active from portal_users u left join portal_wallets w on w.user_id=u.id where u.id=$1")
             .bind(user_id).fetch_one(&self.pool).await.map_err(failure)?;
         Ok(PortalWallet {
             user_id: user_id.to_owned(),
@@ -56,7 +56,6 @@ impl PortalStore for PgPortalStore {
             weekly_used_usd: r.get("weekly_used"),
             active_requests: r.get("active"),
             policy: WalletPolicy {
-                balance_enforced: r.get("enforced"),
                 daily_limit_usd: r.get("daily_limit"),
                 weekly_limit_usd: r.get("weekly_limit"),
                 max_concurrency: u32::try_from(r.get::<i32, _>("concurrency")).unwrap_or_default(),
@@ -85,8 +84,8 @@ impl PortalStore for PgPortalStore {
         user_id: &str,
         policy: gateway_admin::model::portal::WalletPolicy,
     ) -> AdminStoreResult<()> {
-        sqlx::query("insert into portal_wallets(user_id,balance_enforced,daily_limit_usd,weekly_limit_usd,max_concurrency) values($1,$2,$3::text::numeric,$4::text::numeric,$5) on conflict(user_id) do update set balance_enforced=excluded.balance_enforced,daily_limit_usd=excluded.daily_limit_usd,weekly_limit_usd=excluded.weekly_limit_usd,max_concurrency=excluded.max_concurrency,updated_at=now()")
-            .bind(user_id).bind(policy.balance_enforced).bind(policy.daily_limit_usd).bind(policy.weekly_limit_usd).bind(i32::try_from(policy.max_concurrency).unwrap_or(i32::MAX)).execute(&self.pool).await.map_err(failure)?;
+        sqlx::query("insert into portal_wallets(user_id,daily_limit_usd,weekly_limit_usd,max_concurrency) values($1,$2::text::numeric,$3::text::numeric,$4) on conflict(user_id) do update set daily_limit_usd=excluded.daily_limit_usd,weekly_limit_usd=excluded.weekly_limit_usd,max_concurrency=excluded.max_concurrency,updated_at=now()")
+            .bind(user_id).bind(policy.daily_limit_usd).bind(policy.weekly_limit_usd).bind(i32::try_from(policy.max_concurrency).unwrap_or(i32::MAX)).execute(&self.pool).await.map_err(failure)?;
         Ok(())
     }
     async fn credit_wallet(

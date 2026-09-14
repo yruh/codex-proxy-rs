@@ -1,5 +1,5 @@
 export interface PortalUser { id: string, username: string, enabled: boolean }
-export interface WalletPolicy { balanceEnforced: boolean, dailyLimitUsd: string, weeklyLimitUsd: string, maxConcurrency: number }
+export interface WalletPolicy { dailyLimitUsd: string, weeklyLimitUsd: string, maxConcurrency: number }
 export interface PortalWallet extends WalletPolicy { userId: string, balanceUsd: string, totalSpentUsd: string, dailyUsedUsd: string, weeklyUsedUsd: string, activeRequests: number }
 export interface WalletEvent { id: string, kind: string, amountUsd: string, note: string, createdAt: string }
 export interface WalletResponse { wallet: PortalWallet, events: WalletEvent[] }
