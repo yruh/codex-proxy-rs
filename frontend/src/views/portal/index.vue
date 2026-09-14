@@ -24,6 +24,7 @@ async function changePassword() {
       throw new Error('两次输入的新密码不一致')
     await portalRequest('/api/portal/password', { oldPassword: oldPassword.value, newPassword: newPassword.value })
     oldPassword.value = newPassword.value = confirmPassword.value = ''
+    walletData.value = null
     user.value = null
     keys.value = []
     rows.value = []
@@ -59,6 +60,8 @@ async function action(work: () => Promise<void>) {
 }
 async function login() {
   await action(async () => {
+    walletData.value = null
+    notice.value = ''
     user.value = await portalRequest<PortalUser>('/api/portal/login', { username: username.value, password: password.value })
     password.value = ''
     await load()
@@ -68,6 +71,7 @@ async function logout() {
   await action(async () => {
     await portalRequest('/api/portal/logout', {})
     user.value = null
+    walletData.value = null
     keys.value = []
     rows.value = []
     revealed.value = []
