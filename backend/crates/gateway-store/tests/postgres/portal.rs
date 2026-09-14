@@ -132,6 +132,15 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
     let wallet = store.wallet("student").await.unwrap();
     assert_eq!(wallet.balance_usd.parse::<f64>().unwrap(), 0.0);
     assert_eq!(wallet.total_spent_usd.parse::<f64>().unwrap(), 1.0);
+    // 返回的重置点必须与北京时间自然周的记账边界一致。
+    let resets_at = wallet
+        .weekly_resets_at
+        .with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap());
+    assert_eq!(chrono::Datelike::weekday(&resets_at), chrono::Weekday::Mon);
+    assert_eq!(chrono::Timelike::hour(&resets_at), 0);
+    assert_eq!(chrono::Timelike::minute(&resets_at), 0);
+    assert!(wallet.weekly_resets_at > Utc::now());
+    assert!(wallet.weekly_resets_at <= Utc::now() + Duration::days(7));
     assert_eq!(store.wallet_events("student").await.unwrap().len(), 2);
     admission
         .release(&two.client_api_key_id, &two.model_request_id)

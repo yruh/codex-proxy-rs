@@ -46,7 +46,7 @@ impl PortalStore for PgPortalStore {
         user_id: &str,
     ) -> AdminStoreResult<gateway_admin::model::portal::PortalWallet> {
         use gateway_admin::model::portal::{PortalWallet, WalletPolicy};
-        let r = sqlx::query("select u.id,coalesce(w.balance_usd,0)::text as balance,coalesce(w.total_spent_usd,0)::text as spent,coalesce(w.daily_limit_usd,0)::text as daily_limit,coalesce(w.weekly_limit_usd,0)::text as weekly_limit,coalesce(w.max_concurrency,0) as concurrency,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('day',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as daily_used,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('week',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as weekly_used,(select count(*) from portal_user_requests where user_id=u.id and not released and expires_at>now()) as active from portal_users u left join portal_wallets w on w.user_id=u.id where u.id=$1")
+        let r = sqlx::query("select u.id,coalesce(w.balance_usd,0)::text as balance,coalesce(w.total_spent_usd,0)::text as spent,coalesce(w.daily_limit_usd,0)::text as daily_limit,coalesce(w.weekly_limit_usd,0)::text as weekly_limit,coalesce(w.max_concurrency,0) as concurrency,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('day',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as daily_used,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('week',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as weekly_used,((date_trunc('week',now() at time zone 'Asia/Shanghai') + interval '1 week') at time zone 'Asia/Shanghai') as weekly_resets_at,(select count(*) from portal_user_requests where user_id=u.id and not released and expires_at>now()) as active from portal_users u left join portal_wallets w on w.user_id=u.id where u.id=$1")
             .bind(user_id).fetch_one(&self.pool).await.map_err(failure)?;
         Ok(PortalWallet {
             user_id: user_id.to_owned(),
@@ -54,6 +54,7 @@ impl PortalStore for PgPortalStore {
             total_spent_usd: r.get("spent"),
             daily_used_usd: r.get("daily_used"),
             weekly_used_usd: r.get("weekly_used"),
+            weekly_resets_at: r.get("weekly_resets_at"),
             active_requests: r.get("active"),
             policy: WalletPolicy {
                 daily_limit_usd: r.get("daily_limit"),

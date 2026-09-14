@@ -12,6 +12,7 @@ import BaseModal from '@/components/base/BaseModal/index.vue'
 import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
+import PortalWeeklyQuota from '@/components/PortalWeeklyQuota.vue'
 
 const showPassword = ref(false)
 const showLedger = ref(false)
@@ -203,6 +204,9 @@ onMounted(async () => {
         <p class="text-xs leading-relaxed text-cp-text-tertiary">
           余额耗尽自动停止新请求。日／周按北京时间重置，已开始的请求按实际费用结算。
         </p>
+        <BaseCard v-if="walletData">
+          <PortalWeeklyQuota :wallet="walletData.wallet" />
+        </BaseCard>
         <BaseCard title="我的密钥" description="仅显示管理员分配给你的密钥">
           <p v-if="!keys.length" class="py-8 text-center text-sm text-cp-text-tertiary">
             尚未分配密钥，请联系管理员。

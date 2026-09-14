@@ -20,6 +20,7 @@ pub struct PortalWallet {
     pub total_spent_usd: String,
     pub daily_used_usd: String,
     pub weekly_used_usd: String,
+    pub weekly_resets_at: DateTime<Utc>,
     pub active_requests: i64,
     #[serde(flatten)]
     pub policy: WalletPolicy,
