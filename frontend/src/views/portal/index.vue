@@ -120,7 +120,7 @@ onMounted(async () => {
 <template>
   <main class="min-h-dvh bg-cp-bg-layout px-4 py-8 text-cp-text sm:px-8">
     <div class="mx-auto max-w-6xl space-y-5">
-      <div class="mb-8 flex items-center justify-between gap-4">
+      <div class="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <AppBrandMark class="size-10" /><span class="text-lg font-bold">Codex Proxy</span><span class="text-sm text-cp-text-tertiary">用户中心</span>
         </div><div v-if="user" class="flex gap-2">
