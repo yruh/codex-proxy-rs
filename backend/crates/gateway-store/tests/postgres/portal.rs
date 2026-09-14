@@ -63,3 +63,40 @@ async fn portal_sessions_are_invalidated_by_account_changes() {
     assert!(store.session("test-session-hash").await.unwrap().is_none());
     database.close().await;
 }
+
+#[tokio::test]
+async fn portal_keys_are_isolated_and_cannot_transfer_history() {
+    let Some(database) = TestDatabase::create("portal_key_isolation").await else {
+        return;
+    };
+    let store = PgPortalStore::new(database.pool.clone());
+    for id in ["alice", "bob"] {
+        store
+            .create_user(PortalCredential {
+                user: PortalUser {
+                    id: id.into(),
+                    username: id.into(),
+                    enabled: true,
+                    session_version: 1,
+                },
+                password_hash: "test-hash".into(),
+            })
+            .await
+            .unwrap();
+        sqlx::query("insert into client_api_keys(id,name,key,created_at,updated_at) values($1,$1,$2,now(),now())")
+            .bind(id).bind(format!("sk_{}", id.repeat(43))).execute(&database.pool).await.unwrap();
+        store.assign_key(id, id).await.unwrap();
+        store.assign_key(id, id).await.unwrap();
+    }
+    assert!(store.assign_key("alice", "bob").await.is_err());
+    for id in ["alice", "bob"] {
+        let keys = store.own_keys(id).await.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].id, id);
+        assert_eq!(store.owned_key_ids(id).await.unwrap(), vec![id.to_owned()]);
+    }
+    store.update_user("alice", false, None).await.unwrap();
+    assert!(store.own_keys("alice").await.unwrap().is_empty());
+    assert_eq!(store.own_keys("bob").await.unwrap().len(), 1);
+    database.close().await;
+}

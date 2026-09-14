@@ -19,6 +19,7 @@ mod client_keys;
 mod execution;
 mod execution_buffer;
 mod health;
+mod local_usage;
 mod observability;
 mod ops_events;
 mod portal;

@@ -43,6 +43,8 @@ fn source_tree_should_match_frozen_machine_manifest() {
         "src/admin/backups.rs",
         "src/admin/client_keys.rs",
         "src/admin/extract.rs",
+        "src/admin/local_usage.rs",
+        "src/admin/portal.rs",
         "src/admin/mod.rs",
         "src/admin/observability/mod.rs",
         "src/admin/observability/presenter.rs",

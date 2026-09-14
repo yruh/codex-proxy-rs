@@ -19,3 +19,11 @@ jobs:
       ref: ${{ github.sha }}
       run_backend: true
       run_frontend: true
+  container:
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/_container.yml
+    with:
+      ref: ${{ github.sha }}
+      export_image: true

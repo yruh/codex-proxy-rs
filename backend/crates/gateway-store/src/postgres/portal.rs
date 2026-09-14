@@ -182,8 +182,16 @@ impl PortalStore for PgPortalStore {
         Ok(())
     }
     async fn assign_key(&self, key_id: &str, user_id: &str) -> AdminStoreResult<()> {
-        sqlx::query("insert into portal_key_owners(client_api_key_id,user_id) values($1,$2) on conflict(client_api_key_id) do update set user_id=excluded.user_id")
+        let result = sqlx::query("insert into portal_key_owners(client_api_key_id,user_id) values($1,$2) on conflict(client_api_key_id) do update set user_id=excluded.user_id where portal_key_owners.user_id=excluded.user_id")
             .bind(key_id).bind(user_id).execute(&self.pool).await.map_err(failure)?;
+        // 密钥携带历史记录，不能把原用户的历史用量静默转给另一个用户。
+        if result.rows_affected() == 0 {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::DuplicateName,
+                "portal",
+                "该密钥已属于其他用户，请为新用户创建独立密钥",
+            ));
+        }
         Ok(())
     }
     async fn owned_key_ids(&self, user_id: &str) -> AdminStoreResult<Vec<String>> {

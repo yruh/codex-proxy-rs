@@ -7,6 +7,10 @@ on:
         description: Exact commit SHA to build and validate
         required: true
         type: string
+      export_image:
+        description: Save the verified image as a deployment artifact
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -75,3 +79,15 @@ jobs:
           image: ${{ env.CPR_IMAGE }}
           platform: linux/amd64
           artifact-name: container-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-amd64
+
+      - name: Export verified image
+        if: inputs.export_image
+        run: docker save "$CPR_IMAGE" | gzip > codex-proxy-rs-linux-amd64.tar.gz
+
+      - name: Upload deployment image
+        if: inputs.export_image
+        uses: actions/upload-artifact@v4
+        with:
+          name: dual-source-image-${{ inputs.ref }}
+          path: codex-proxy-rs-linux-amd64.tar.gz
+          retention-days: 7
