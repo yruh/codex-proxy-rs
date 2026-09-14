@@ -223,7 +223,7 @@ fn partial_account_history_or_missing_usage_keep_diagnostics_without_estimates()
     assert!(
         week.unavailable_reason
             .unwrap()
-            .contains("没有网关用量记录")
+            .contains("没有已采集的本地或代理用量")
     );
 }
 
