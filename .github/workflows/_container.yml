@@ -67,6 +67,8 @@ jobs:
           target: runtime
           load: true
           tags: ${{ env.CPR_IMAGE }}
+          build-args: |
+            CPR_GIT_SHA=${{ inputs.ref }}
           no-cache-filters: |
             runtime-base
             runtime

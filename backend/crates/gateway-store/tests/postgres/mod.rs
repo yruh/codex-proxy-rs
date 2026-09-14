@@ -236,11 +236,16 @@ async fn connect_and_migrate_should_apply_all_migrations_once_and_reopen_cleanly
             "client_api_keys",
             "client_key_budget_windows",
             "client_key_charge_events",
+            "local_usage_records",
             "model_requests",
             "ops_events",
             "outbound_proxies",
+            "portal_key_owners",
+            "portal_sessions",
+            "portal_users",
             "provider_accounts",
             "runtime_settings",
+            "usage_sync_devices",
         ]
     );
     assert_eq!(session_settings, ("codex-proxy-rs".to_owned(), 30, 5, 30));
