@@ -63,6 +63,8 @@ pub struct QuotaForecastHistoryPoint {
 
 #[derive(Debug, Clone, Default)]
 pub struct QuotaForecastHistory {
+    /// 导入服务器前已有的本地采集记录，可用于确定更早的采集起点。
+    pub first_local_usage_at: Option<DateTime<Utc>>,
     pub points: Vec<QuotaForecastHistoryPoint>,
     pub usage: QuotaForecastUsage,
     pub pending_request_count: u64,

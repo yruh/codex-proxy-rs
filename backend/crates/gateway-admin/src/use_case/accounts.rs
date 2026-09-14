@@ -604,6 +604,7 @@ impl AccountsService for DefaultAccountsService {
             .map_err(|error| map_provider_error(error, "forecast quota snapshot"))?;
         let now = Utc::now();
         let mut samples = Vec::new();
+        let mut collection_started_at = stored.account.created_at;
         for (window, _) in quota.usage_windows() {
             let (Some(mut query), Some(observed), Some(percent)) = (
                 quota_usage_window(account_id.as_str(), window),
@@ -612,7 +613,6 @@ impl AccountsService for DefaultAccountsService {
             ) else {
                 continue;
             };
-            query.range.start = query.range.start.max(stored.account.created_at);
             if query.range.start >= observed
                 || observed > now
                 || now >= query.range.end
@@ -628,6 +628,11 @@ impl AccountsService for DefaultAccountsService {
                 .load_quota_forecast_history(&query)
                 .await
                 .map_err(|error| map_store_error(error, "forecast paired usage"))?;
+            // 服务器导入时间不等于本地采集起点；历史账本仍只提供估算依据，
+            // 不证明站外用量完整。没有周期前记录时保留原来的不完整周期保护。
+            if let Some(first_local) = history.first_local_usage_at {
+                collection_started_at = collection_started_at.min(first_local);
+            }
             let mut points = Vec::new();
             let mut interrupted = false;
             for point in history.points {
@@ -676,7 +681,7 @@ impl AccountsService for DefaultAccountsService {
         Ok(AccountQuotaForecastReport {
             account_id: account_id.to_string(),
             generated_at: now,
-            forecasts: account_quota_forecasts(&quota, stored.account.created_at, now, &samples),
+            forecasts: account_quota_forecasts(&quota, collection_started_at, now, &samples),
         })
     }
 

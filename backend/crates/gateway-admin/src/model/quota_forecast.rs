@@ -156,7 +156,7 @@ impl AccountQuotaForecast {
             return;
         };
         let Some(usage) = usage.filter(|usage| usage.request_count > 0) else {
-            self.unavailable_reason = Some("本周期没有网关用量记录，暂时无法预测额度。");
+            self.unavailable_reason = Some("本周期没有已采集的本地或代理用量，暂时无法预测额度。");
             return;
         };
         let Some(sample) = sample.filter(|sample| {

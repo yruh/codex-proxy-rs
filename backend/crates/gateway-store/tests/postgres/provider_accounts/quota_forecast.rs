@@ -6,6 +6,81 @@ use gateway_store::postgres::{
 };
 
 #[tokio::test]
+async fn quota_forecast_combines_local_usage_at_matching_observation_boundaries() {
+    let Some(database) = TestDatabase::create("forecast_dual").await else {
+        return;
+    };
+    let repo = PgProviderAccountRepository::new(database.pool.clone());
+    for id in ["acct_dual", "acct_other"] {
+        repo.insert_provider_account(account(id, id)).await.unwrap();
+    }
+    for (id, owner) in [("device-a", "acct_dual"), ("device-b", "acct_other")] {
+        sqlx::query("insert into usage_sync_devices(id,name,provider_account_id,token_hash,enabled) values($1,$1,$2,$1,false)")
+            .bind(id).bind(owner).execute(&database.pool).await.unwrap();
+    }
+    let start = "2026-09-12T00:00:00Z"
+        .parse::<chrono::DateTime<Utc>>()
+        .unwrap();
+    let end = start + TimeDelta::minutes(30);
+    seed_model_request(
+        &database.pool,
+        ModelRequestSeed {
+            request_id: "same-id",
+            account_id: "acct_dual",
+            provider_kind: "openai",
+            model: "test",
+            total_tokens: 100,
+            cost_amount: "1",
+            started_at: start + TimeDelta::minutes(5),
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "update model_requests set provider_observation_json='{}'::jsonb where id='same-id'",
+    )
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    for (id, seconds, cost, excluded, device) in [
+        ("excluded-old", -120, Some("99"), true, "device-a"),
+        ("before", -60, Some("99"), false, "device-a"),
+        ("start", 0, Some("2"), false, "device-a"),
+        ("same-id", 301, Some("3"), false, "device-a"),
+        ("after-point", 302, None, false, "device-a"),
+        ("end", 1800, Some("99"), false, "device-a"),
+        ("other", -300, Some("99"), false, "device-b"),
+        ("other-now", 0, Some("99"), false, "device-b"),
+    ] {
+        sqlx::query("insert into local_usage_records(device_id,record_id,revision,occurred_at,input_tokens,output_tokens,cached_tokens,estimated_usd,excluded) values($1,$2,1,$3,900,100,800,$4::text::numeric,$5)")
+            .bind(device).bind(id).bind(start + TimeDelta::seconds(seconds)).bind(cost).bind(excluded).execute(&database.pool).await.unwrap();
+    }
+    let history = admin_account_store(&database.pool)
+        .load_quota_forecast_history(&AccountUsageWindowQuery {
+            account_id: "acct_dual".into(),
+            key: "week".into(),
+            range: TimeRange { start, end },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        history.first_local_usage_at,
+        Some(start - TimeDelta::seconds(60))
+    );
+    assert_eq!(history.usage.request_count, 4);
+    assert_eq!(history.usage.tokens, 3100);
+    assert_eq!(history.usage.cached_tokens, 2400);
+    assert_eq!(history.usage.usd, 6.0);
+    assert_eq!(history.usage.known_cost_count, 3);
+    assert_eq!(history.usage.unavailable_cost_count, 1);
+    assert_eq!(history.points.len(), 1);
+    assert_eq!(history.points[0].usage.tokens, 2100);
+    assert_eq!(history.points[0].usage.usd, 6.0);
+    assert_eq!(history.pending_request_count, 0);
+    database.close().await;
+}
+
+#[tokio::test]
 async fn quota_forecast_excludes_openai_prewarm_but_preserves_inference_and_audit() {
     let Some(database) = TestDatabase::create("forecast_prewarm").await else {
         return;

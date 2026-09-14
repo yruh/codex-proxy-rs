@@ -53,6 +53,7 @@ pub(super) async fn load_history(
         if window_usage_value::<bool>(row, "is_total")? {
             history.usage = usage;
             history.pending_request_count = window_usage_count(row, "pending_count")?;
+            history.first_local_usage_at = window_usage_value(row, "first_local_usage_at")?;
         } else if let Some(document) = window_usage_value::<
             Option<sqlx::types::Json<serde_json::Map<String, serde_json::Value>>>,
         >(row, "document")?
@@ -73,7 +74,11 @@ fn history_sql() -> String {
     // 一个语句共享 MVCC 快照。用 RANGE 帧让相同完成时间的点拥有相同累计值，
     // 避免并发请求的任意行顺序制造不同分子；未完成请求只进入待决计数。
     format!(
-        "with scoped as materialized (
+        "with coverage as (
+            select min(l.occurred_at) as first_local_usage_at
+              from local_usage_records l join usage_sync_devices d on d.id = l.device_id
+             where d.provider_account_id = $1 and not l.excluded and l.occurred_at < $3
+        ), scoped as materialized (
             select mr.id, mr.started_at, mr.completed_at,
                    mr.completed_at <= $3 and mr.outcome <> 'running' as settled,
                    coalesce(({completed_usage}), false) as included,
@@ -85,6 +90,15 @@ fn history_sql() -> String {
               from model_requests mr
              where mr.provider_account_ref = $1
                and mr.started_at >= $2 and mr.started_at < $3
+            union all
+            select 'local:' || l.device_id || ':' || l.record_id,
+                   l.occurred_at, l.occurred_at, true, not l.excluded, false,
+                   l.input_tokens, l.output_tokens, l.cached_tokens,
+                   l.input_tokens + l.output_tokens, l.estimated_usd, 'USD',
+                   l.estimated_usd is not null
+              from local_usage_records l join usage_sync_devices d on d.id = l.device_id
+             where d.provider_account_id = $1
+               and l.occurred_at >= $2 and l.occurred_at < $3
         ), facts as materialized (
             select *,
                 (included and settled)::integer as request_count,
@@ -125,7 +139,8 @@ fn history_sql() -> String {
             s.output_tokens::bigint, s.cached_tokens::bigint, s.missing_token_count::bigint,
             s.known_cost_count::bigint, s.unavailable_cost_count::bigint,
             s.usd::double precision, s.excluded_request_count::bigint,
-            0::bigint as pending_count, mr.provider_observation_json as document
+            0::bigint as pending_count, mr.provider_observation_json as document,
+            null::timestamptz as first_local_usage_at
           from selected s join model_requests mr on mr.id = s.id
         union all
         select true, $3, $3,
@@ -134,7 +149,8 @@ fn history_sql() -> String {
             coalesce(sum(cached), 0)::bigint, coalesce(sum(missing_tokens), 0)::bigint,
             coalesce(sum(known_costs), 0)::bigint, coalesce(sum(missing_costs), 0)::bigint,
             coalesce(sum(usd), 0)::double precision, coalesce(sum(excluded), 0)::bigint,
-            count(*) filter (where settled is not true), null::jsonb
+            count(*) filter (where settled is not true), null::jsonb,
+            (select first_local_usage_at from coverage)
           from facts
         order by completed_at, is_total"
     )

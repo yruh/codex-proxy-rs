@@ -1917,6 +1917,7 @@ async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_
             ..Default::default()
         },
         pending_request_count: 1,
+        first_local_usage_at: None,
     };
     let services = accounts_service(provider, store.clone()).await;
     let result = services
@@ -1927,7 +1928,10 @@ async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_
     assert!(result.forecasts[0].unavailable_reason.is_none());
     assert_eq!(result.forecasts[0].estimated_tokens, Some(5_000));
     assert_eq!(result.forecasts[0].remaining_tokens, Some(3_000));
-    assert_eq!(store.quota_window_queries()[0].range.start, added);
+    assert_eq!(
+        store.quota_window_queries()[0].range.start,
+        reset - TimeDelta::days(7)
+    );
     store
         .quota_forecast_history
         .lock()
@@ -1946,6 +1950,29 @@ async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_
             .unwrap()
             .contains("不连续")
     );
+    // 纯本地账本若早于本周起点，服务器导入较晚不应截掉已存在的历史。
+    {
+        let mut history = store.quota_forecast_history.lock().unwrap();
+        history.points.clear();
+        history.first_local_usage_at = Some(reset - TimeDelta::days(8));
+    }
+    let result = services
+        .accounts()
+        .quota_forecast(&ProviderAccountId::new("acct_test").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(result.forecasts[0].estimated_tokens, Some(5_000));
+    store
+        .quota_forecast_history
+        .lock()
+        .unwrap()
+        .first_local_usage_at = Some(added);
+    let result = services
+        .accounts()
+        .quota_forecast(&ProviderAccountId::new("acct_test").unwrap())
+        .await
+        .unwrap();
+    assert!(result.forecasts[0].estimated_tokens.is_none());
 }
 
 #[tokio::test]

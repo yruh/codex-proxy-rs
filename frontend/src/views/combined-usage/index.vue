@@ -13,6 +13,7 @@ import BaseModal from '@/components/base/BaseModal/index.vue'
 import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
+import WeeklyQuotaCard from './components/WeeklyQuotaCard.vue'
 
 interface Daily { day: string, source: string, requests: number, inputTokens: string, outputTokens: string, cachedTokens: string, estimatedUsd: string | null, pricedRequests: number }
 interface Device { id: string, name: string, accountId: string, enabled: boolean, lastSyncAt: string | null }
@@ -48,6 +49,9 @@ const calendar = computed(() => {
 const peak = computed(() => Math.max(1, ...calendar.value.map(d => d.local + d.proxy)))
 const activeDays = computed(() => calendar.value.filter(d => d.local + d.proxy > 0).length)
 const scopedAccounts = computed(() => accounts.value.filter(a => !accountId.value || a.id === accountId.value))
+function updateAccount(account: Account) {
+  accounts.value = accounts.value.map(item => item.id === account.id ? account : item)
+}
 function metricValue(r: Daily) {
   return metric.value === 'tokens' ? Number(r.inputTokens) + Number(r.outputTokens) : metric.value === 'cost' ? Number(r.estimatedUsd || 0) : r.requests
 }
@@ -167,6 +171,7 @@ onMounted(() => action(load))
         </p>
       </div>
     </BaseCard>
+    <WeeklyQuotaCard v-for="account in scopedAccounts.filter(a => a.provider === 'openai')" :key="account.id" :account="account" @account-updated="updateAccount" />
     <div class="grid gap-4 md:grid-cols-3">
       <BaseCard v-for="card in cards" :key="card.source">
         <div class="flex items-center justify-between">
