@@ -170,6 +170,8 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别 Codex Desktop/
 - Provider 的一次 `execute` 只选择一个 credential 并返回一个冷流；换号、重试和 fallback 由 Core 决定。
 - `not_sent`、`sent`、`ambiguous` 是单调的上游发送边界；结果不明确时不能假定上游未收到请求。
 - downstream commit 是不可撤回的交付承诺。commit 后禁止换号、重试和 fallback。
+- Provider 可将明确容量拒绝标记为有界同账号退避，Core 在既有安全重放边界内执行，按账号维护请求内
+  预算，耗尽后复用普通换号路径。该退避消耗总路由预算，与 WS 传输恢复、OAuth 刷新及账号额度冷却分开。
 - 跨 Provider 只在账号范围和能力都允许，且请求尚未到达上游或已被证明可安全重放时发生。
 - 可恢复观测写入失败不能替换已经确定的客户端协议结果。
 
@@ -427,7 +429,9 @@ observation、调用 metadata；最终失败的关联头不与 opening 身份混
 `generate: false` 将连接与上下文准备归类为 `prewarm`，不信任客户端单独声明的同名 metadata。
 Store 的共享用量口径排除这些预热记录，账号用量与额度预测复用同一规则；原始请求审计、响应额度
 观测和费用事实仍保留，不将未知费用改写为零，也不影响 Client Key 结算账本。
-实际 `service_tier` 只接受上游响应事件确认，不能用请求期望值替代。
+OpenAI Responses 的统计档位与本地费用估算统一使用 Provider 最终发给上游的请求 `service_tier`，
+不由响应回显覆盖；未发送档位时保留缺失值，展示与估算按标准档处理。上游响应档位独立保留在
+Provider metadata 的 `upstreamServiceTier`，不改写客户端收到的响应，也不据此断言实际加速效果。
 
 Worker 由各 Bundle 贡献、由 Host 统一监督：
 
