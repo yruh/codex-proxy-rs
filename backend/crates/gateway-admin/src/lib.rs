@@ -19,6 +19,8 @@ use serde::Deserialize;
 pub mod backup;
 pub mod model;
 pub mod ports;
+pub use use_case::local_usage::LocalUsageService;
+pub use use_case::portal::PortalService;
 mod use_case;
 
 pub use use_case::{
@@ -149,6 +151,8 @@ pub enum AdminConfigError {
 /// 字段全部私有；调用方经 accessor 直接调用能力，不需要命名内部 `use_case` 模块。
 #[derive(Clone)]
 pub struct AdminServices {
+    portal: Option<Arc<PortalService>>,
+    local_usage: Option<Arc<LocalUsageService>>,
     proxies: Arc<dyn ProxiesService>,
     auth: Arc<dyn AuthService>,
     accounts: Arc<dyn AccountsService>,
@@ -164,6 +168,21 @@ pub struct AdminServices {
 }
 
 impl AdminServices {
+    pub fn local_usage(&self) -> Result<&LocalUsageService, AdminError> {
+        self.local_usage
+            .as_deref()
+            .ok_or_else(|| AdminError::new(AdminErrorKind::Unavailable, "本地同步未配置"))
+    }
+    /// 获取已装配的普通用户门户。
+    ///
+    /// # Errors
+    ///
+    /// 未装配门户存储时返回不可用，不回退到管理员身份。
+    pub fn portal(&self) -> Result<&PortalService, AdminError> {
+        self.portal
+            .as_deref()
+            .ok_or_else(|| AdminError::new(AdminErrorKind::Unavailable, "普通用户门户未配置"))
+    }
     #[must_use]
     pub fn proxies(&self) -> &dyn ProxiesService {
         self.proxies.as_ref()
@@ -297,6 +316,12 @@ pub async fn initialize(
         backup_ports.object_store(),
     );
     let services = AdminServices {
+        portal: store
+            .portal()
+            .map(|port| Arc::new(PortalService::new(port))),
+        local_usage: store
+            .local_usage()
+            .map(|port| Arc::new(LocalUsageService::new(port))),
         proxies: Arc::new(use_case::proxies::DefaultProxiesService::new(
             store.proxies(),
             proxy_probe,

@@ -41,6 +41,58 @@ fn user(row: &PgRow) -> Result<PortalUser, sqlx::Error> {
 
 #[async_trait]
 impl PortalStore for PgPortalStore {
+    async fn own_keys(
+        &self,
+        user_id: &str,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::portal::PortalKey>> {
+        let rows=sqlx::query("select k.id,k.name,k.key,k.enabled from client_api_keys k join portal_key_owners o on o.client_api_key_id=k.id join portal_users u on u.id=o.user_id where u.id=$1 and u.enabled order by k.created_at")
+            .bind(user_id).fetch_all(&self.pool).await.map_err(failure)?;
+        rows.iter()
+            .map(|r| {
+                Ok(gateway_admin::model::portal::PortalKey {
+                    id: r.try_get("id")?,
+                    name: r.try_get("name")?,
+                    key: r.try_get("key")?,
+                    enabled: r.try_get("enabled")?,
+                })
+            })
+            .collect::<Result<Vec<_>, sqlx::Error>>()
+            .map_err(failure)
+    }
+    async fn own_usage(
+        &self,
+        user_id: &str,
+        range: gateway_admin::model::observability::TimeRange,
+        offset: i64,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::portal::PortalUsageRow>> {
+        let predicate = super::completed_usage_fact_predicate("r");
+        let query = format!(
+            "select r.id,o.client_api_key_id,r.upstream_model_id,r.started_at,r.input_tokens,r.output_tokens,r.cached_tokens,r.cost_amount::text as cost from model_requests r join portal_key_owners o on o.client_api_key_id=r.client_api_key_ref join portal_users u on u.id=o.user_id where u.id=$1 and u.enabled and r.started_at >= $2 and r.started_at < $3 and {predicate} order by r.started_at desc,r.id desc limit 100 offset $4"
+        );
+        let rows = sqlx::query(sqlx::AssertSqlSafe(query))
+            .bind(user_id)
+            .bind(range.start)
+            .bind(range.end)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(failure)?;
+        rows.iter()
+            .map(|r| {
+                Ok(gateway_admin::model::portal::PortalUsageRow {
+                    id: r.try_get("id")?,
+                    key_id: r.try_get("client_api_key_id")?,
+                    model: r.try_get("upstream_model_id")?,
+                    occurred_at: r.try_get("started_at")?,
+                    input_tokens: r.try_get("input_tokens")?,
+                    output_tokens: r.try_get("output_tokens")?,
+                    cached_tokens: r.try_get("cached_tokens")?,
+                    cost: r.try_get("cost")?,
+                })
+            })
+            .collect::<Result<Vec<_>, sqlx::Error>>()
+            .map_err(failure)
+    }
     async fn user_credentials(&self, username: &str) -> AdminStoreResult<Option<PortalCredential>> {
         let row = sqlx::query("select id, username, enabled, session_version, password_hash from portal_users where username=$1")
             .bind(username).fetch_optional(&self.pool).await.map_err(failure)?;

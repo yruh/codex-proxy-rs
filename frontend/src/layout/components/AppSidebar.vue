@@ -64,6 +64,8 @@ const navItems = [
   { label: '分组管理', icon: FolderTree, path: '/account-groups' },
   { label: 'API 密钥', icon: KeyRound, path: '/api-keys' },
   { label: '使用统计', icon: ChartNoAxesColumn, path: '/usage' },
+  { label: '双端合并统计', icon: ChartNoAxesColumn, path: '/combined-usage' },
+  { label: '用户管理', icon: ChartNoAxesColumn, path: '/portal-users' },
   { label: '主题设置', icon: Palette, path: '/theme' },
   { label: '系统设置', icon: Settings, path: '/settings' },
 ]

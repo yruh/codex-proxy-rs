@@ -3,10 +3,20 @@
 use async_trait::async_trait;
 
 use super::store::AdminStoreResult;
-use crate::model::portal::{PortalCredential, PortalSession, PortalUser};
+use crate::model::{
+    observability::TimeRange,
+    portal::{PortalCredential, PortalKey, PortalSession, PortalUsageRow, PortalUser},
+};
 
 #[async_trait]
 pub trait PortalStore: Send + Sync {
+    async fn own_keys(&self, user_id: &str) -> AdminStoreResult<Vec<PortalKey>>;
+    async fn own_usage(
+        &self,
+        user_id: &str,
+        range: TimeRange,
+        offset: i64,
+    ) -> AdminStoreResult<Vec<PortalUsageRow>>;
     async fn user_credentials(&self, username: &str) -> AdminStoreResult<Option<PortalCredential>>;
     async fn user(&self, id: &str) -> AdminStoreResult<Option<PortalUser>>;
     async fn users(&self) -> AdminStoreResult<Vec<PortalUser>>;

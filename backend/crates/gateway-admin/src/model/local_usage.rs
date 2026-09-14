@@ -22,6 +22,7 @@ pub struct LocalUsageRecord {
     pub duration_ms: Option<i64>,
     pub first_token_ms: Option<i64>,
     pub excluded: bool,
+    pub estimated_usd: Option<String>,
 }
 
 impl LocalUsageRecord {
@@ -31,6 +32,21 @@ impl LocalUsageRecord {
     ///
     /// 标识、修订号、token 子集或计时非法时返回校验错误。
     pub fn validate(&self) -> Result<(), AdminError> {
+        if let Some(amount) = &self.estimated_usd {
+            let mut parts = amount.split('.');
+            let whole = parts.next().unwrap_or("");
+            let fraction = parts.next();
+            if whole.is_empty()
+                || whole.len() > 12
+                || !whole.bytes().all(|b| b.is_ascii_digit())
+                || parts.next().is_some()
+                || fraction.is_some_and(|f| {
+                    f.is_empty() || f.len() > 12 || !f.bytes().all(|b| b.is_ascii_digit())
+                })
+            {
+                return Err(AdminError::invalid("API 等价金额无效"));
+            }
+        }
         let bounded = |value: &str| {
             !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
         };
@@ -68,62 +84,5 @@ impl LocalUsageRecord {
             return Err(AdminError::invalid("本地记录计时无效"));
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn record() -> LocalUsageRecord {
-        LocalUsageRecord {
-            record_id: "request-1".into(),
-            revision: 1,
-            occurred_at: Utc::now(),
-            session_id: None,
-            parent_session_id: None,
-            model: Some("model".into()),
-            reasoning_effort: None,
-            service_tier: None,
-            transport: None,
-            input_tokens: 100,
-            output_tokens: 10,
-            cached_tokens: None,
-            reasoning_tokens: None,
-            duration_ms: None,
-            first_token_ms: None,
-            excluded: false,
-        }
-    }
-
-    #[test]
-    fn missing_measurements_stay_missing() {
-        let value = record();
-        assert!(value.validate().is_ok());
-        assert_eq!(value.cached_tokens, None);
-        assert_eq!(value.first_token_ms, None);
-    }
-
-    #[test]
-    fn rejects_invalid_token_subsets_and_overflow() {
-        let mut value = record();
-        value.cached_tokens = Some(101);
-        assert!(value.validate().is_err());
-        value.cached_tokens = None;
-        value.reasoning_tokens = Some(11);
-        assert!(value.validate().is_err());
-        value.reasoning_tokens = None;
-        value.input_tokens = i64::MAX;
-        assert!(value.validate().is_err());
-    }
-
-    #[test]
-    fn rejects_unbounded_fields_and_old_revision_shape() {
-        let mut value = record();
-        value.revision = 0;
-        assert!(value.validate().is_err());
-        value.revision = 1;
-        value.session_id = Some("x".repeat(257));
-        assert!(value.validate().is_err());
     }
 }

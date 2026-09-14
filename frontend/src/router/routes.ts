@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from 'vue-router'
 
 export const routes: RouteRecordRaw[] = [
+  { path: '/portal', name: 'portal', component: () => import('@/views/portal/index.vue') },
   {
     path: '/login',
     name: 'login',
@@ -10,6 +11,8 @@ export const routes: RouteRecordRaw[] = [
     path: '/',
     component: () => import('@/layout/index.vue'),
     children: [
+      { path: 'combined-usage', name: 'combined-usage', component: () => import('@/views/combined-usage/index.vue') },
+      { path: 'portal-users', name: 'portal-users', component: () => import('@/views/portal-users/index.vue') },
       {
         path: '',
         name: 'dashboard',

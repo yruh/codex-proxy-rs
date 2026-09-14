@@ -10,6 +10,8 @@ export const router = createRouter({
 
 // 路由守卫
 router.beforeEach(async (to) => {
+  if (to.name === 'portal')
+    return
   const authStore = useAuthStore()
 
   // 登录页面不需要认证

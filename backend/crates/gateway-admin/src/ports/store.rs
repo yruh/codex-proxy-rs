@@ -408,6 +408,8 @@ impl AdminAccountStorePorts {
 /// 字段保持私有，每个 getter 只交出一种明确能力。该类型不提供通用拆包入口。
 #[derive(Clone)]
 pub struct AdminStorePorts {
+    portal: Option<Arc<dyn super::portal::PortalStore>>,
+    local_usage: Option<Arc<dyn super::local_usage::LocalUsageStore>>,
     accounts: AdminAccountStorePorts,
     auth: Arc<dyn AuthStore>,
     client_keys: Arc<dyn ClientKeyStore>,
@@ -427,6 +429,8 @@ impl AdminStorePorts {
         backup: BackupStorePorts,
     ) -> Self {
         Self {
+            portal: None,
+            local_usage: None,
             accounts,
             auth,
             client_keys,
@@ -459,6 +463,27 @@ impl AdminStorePorts {
     #[must_use]
     pub fn auth(&self) -> Arc<dyn AuthStore> {
         self.auth.clone()
+    }
+
+    #[must_use]
+    pub fn with_portal(mut self, portal: Arc<dyn super::portal::PortalStore>) -> Self {
+        self.portal = Some(portal);
+        self
+    }
+
+    #[must_use]
+    pub fn portal(&self) -> Option<Arc<dyn super::portal::PortalStore>> {
+        self.portal.clone()
+    }
+
+    #[must_use]
+    pub fn with_local_usage(mut self, store: Arc<dyn super::local_usage::LocalUsageStore>) -> Self {
+        self.local_usage = Some(store);
+        self
+    }
+    #[must_use]
+    pub fn local_usage(&self) -> Option<Arc<dyn super::local_usage::LocalUsageStore>> {
+        self.local_usage.clone()
     }
 
     #[must_use]
