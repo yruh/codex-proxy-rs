@@ -27,6 +27,72 @@ pub struct PortalService {
 }
 
 impl PortalService {
+    pub async fn wallet(&self, id: &str) -> Result<crate::model::portal::PortalWallet, AdminError> {
+        self.store.wallet(id).await.map_err(store_error)
+    }
+    pub async fn wallet_events(
+        &self,
+        id: &str,
+    ) -> Result<Vec<crate::model::portal::WalletEvent>, AdminError> {
+        self.store.wallet_events(id).await.map_err(store_error)
+    }
+    pub async fn set_wallet_policy(
+        &self,
+        id: &str,
+        mut policy: crate::model::portal::WalletPolicy,
+    ) -> Result<(), AdminError> {
+        policy.daily_limit_usd = wallet_amount(&policy.daily_limit_usd)?;
+        policy.weekly_limit_usd = wallet_amount(&policy.weekly_limit_usd)?;
+        if policy.max_concurrency > 10000 {
+            return Err(AdminError::invalid("并发上限不得超过 10000"));
+        }
+        self.store
+            .set_wallet_policy(id, policy)
+            .await
+            .map_err(store_error)
+    }
+    pub async fn credit_wallet(
+        &self,
+        id: &str,
+        operation_id: &str,
+        amount: &str,
+        note: &str,
+    ) -> Result<(), AdminError> {
+        let amount = wallet_amount(amount)?;
+        if amount == "0" || Uuid::parse_str(operation_id).is_err() || note.len() > 500 {
+            return Err(AdminError::invalid(
+                "充值金额必须大于 0，操作编号必须有效，备注不超过 500 字节",
+            ));
+        }
+        self.store
+            .credit_wallet(id, operation_id, &amount, note)
+            .await
+            .map_err(store_error)
+    }
+    pub async fn change_password(
+        &self,
+        token: &str,
+        old_password: String,
+        new_password: String,
+    ) -> Result<(), AdminError> {
+        let user = self.current_user(token).await?;
+        // 复用登录的密码校验与限流；临时会话立即撤销，修改后所有旧会话一并失效。
+        let (verification_token, verified) = self.login(&user.username, old_password).await?;
+        self.logout(&verification_token).await?;
+        if verified.session_version != user.session_version {
+            return Err(unauthorized());
+        }
+        let hash = self.hash_password(new_password).await?;
+        if !self
+            .store
+            .change_password(&user.id, user.session_version, &hash)
+            .await
+            .map_err(store_error)?
+        {
+            return Err(unauthorized());
+        }
+        Ok(())
+    }
     pub async fn keys(
         &self,
         token: &str,
@@ -261,6 +327,20 @@ impl PortalService {
 
 fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
+}
+fn wallet_amount(value: &str) -> Result<String, AdminError> {
+    if value.is_empty()
+        || value.len() > 24
+        || value.starts_with('-')
+        || !value.chars().all(|c| c.is_ascii_digit() || c == '.')
+        || value.split('.').nth(1).is_some_and(|s| s.len() > 8)
+    {
+        return Err(AdminError::invalid("USD 金额必须为非负数，最多 8 位小数"));
+    }
+    let amount: gateway_core::metering::Decimal = value
+        .parse()
+        .map_err(|_| AdminError::invalid("USD 金额无效"))?;
+    Ok(amount.canonical())
 }
 fn unauthorized() -> AdminError {
     AdminError::new(AdminErrorKind::Unauthorized, "登录信息无效或无权访问")

@@ -41,6 +41,99 @@ fn user(row: &PgRow) -> Result<PortalUser, sqlx::Error> {
 
 #[async_trait]
 impl PortalStore for PgPortalStore {
+    async fn wallet(
+        &self,
+        user_id: &str,
+    ) -> AdminStoreResult<gateway_admin::model::portal::PortalWallet> {
+        use gateway_admin::model::portal::{PortalWallet, WalletPolicy};
+        let r = sqlx::query("select u.id,coalesce(w.balance_usd,0)::text as balance,coalesce(w.total_spent_usd,0)::text as spent,coalesce(w.balance_enforced,false) as enforced,coalesce(w.daily_limit_usd,0)::text as daily_limit,coalesce(w.weekly_limit_usd,0)::text as weekly_limit,coalesce(w.max_concurrency,0) as concurrency,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('day',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as daily_used,(select coalesce(-sum(amount_usd),0)::text from portal_wallet_events where user_id=u.id and kind='usage' and created_at >= date_trunc('week',now() at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai') as weekly_used,(select count(*) from portal_user_requests where user_id=u.id and not released and expires_at>now()) as active from portal_users u left join portal_wallets w on w.user_id=u.id where u.id=$1")
+            .bind(user_id).fetch_one(&self.pool).await.map_err(failure)?;
+        Ok(PortalWallet {
+            user_id: user_id.to_owned(),
+            balance_usd: r.get("balance"),
+            total_spent_usd: r.get("spent"),
+            daily_used_usd: r.get("daily_used"),
+            weekly_used_usd: r.get("weekly_used"),
+            active_requests: r.get("active"),
+            policy: WalletPolicy {
+                balance_enforced: r.get("enforced"),
+                daily_limit_usd: r.get("daily_limit"),
+                weekly_limit_usd: r.get("weekly_limit"),
+                max_concurrency: u32::try_from(r.get::<i32, _>("concurrency")).unwrap_or_default(),
+            },
+        })
+    }
+    async fn wallet_events(
+        &self,
+        user_id: &str,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::portal::WalletEvent>> {
+        let rows = sqlx::query("select id,kind,amount_usd::text as amount,note,created_at from portal_wallet_events where user_id=$1 order by created_at desc,id desc limit 100")
+            .bind(user_id).fetch_all(&self.pool).await.map_err(failure)?;
+        Ok(rows
+            .iter()
+            .map(|r| gateway_admin::model::portal::WalletEvent {
+                id: r.get("id"),
+                kind: r.get("kind"),
+                amount_usd: r.get("amount"),
+                note: r.get("note"),
+                created_at: r.get("created_at"),
+            })
+            .collect())
+    }
+    async fn set_wallet_policy(
+        &self,
+        user_id: &str,
+        policy: gateway_admin::model::portal::WalletPolicy,
+    ) -> AdminStoreResult<()> {
+        sqlx::query("insert into portal_wallets(user_id,balance_enforced,daily_limit_usd,weekly_limit_usd,max_concurrency) values($1,$2,$3::text::numeric,$4::text::numeric,$5) on conflict(user_id) do update set balance_enforced=excluded.balance_enforced,daily_limit_usd=excluded.daily_limit_usd,weekly_limit_usd=excluded.weekly_limit_usd,max_concurrency=excluded.max_concurrency,updated_at=now()")
+            .bind(user_id).bind(policy.balance_enforced).bind(policy.daily_limit_usd).bind(policy.weekly_limit_usd).bind(i32::try_from(policy.max_concurrency).unwrap_or(i32::MAX)).execute(&self.pool).await.map_err(failure)?;
+        Ok(())
+    }
+    async fn credit_wallet(
+        &self,
+        user_id: &str,
+        operation_id: &str,
+        amount: &str,
+        note: &str,
+    ) -> AdminStoreResult<()> {
+        let mut tx = self.pool.begin().await.map_err(failure)?;
+        sqlx::query("insert into portal_wallets(user_id) values($1) on conflict do nothing")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failure)?;
+        sqlx::query("select user_id from portal_wallets where user_id=$1 for update")
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(failure)?;
+        let id = format!("credit:{operation_id}");
+        let changed = sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,note) values($1,$2,'credit',$3::text::numeric,$4) on conflict(id) do nothing")
+            .bind(&id).bind(user_id).bind(amount).bind(note).execute(&mut *tx).await.map_err(failure)?.rows_affected();
+        if changed == 1 {
+            sqlx::query("update portal_wallets set balance_usd=balance_usd+$2::text::numeric,updated_at=now() where user_id=$1").bind(user_id).bind(amount).execute(&mut *tx).await.map_err(failure)?;
+        } else {
+            let matches:bool=sqlx::query_scalar("select user_id=$2 and amount_usd=$3::text::numeric and note=$4 from portal_wallet_events where id=$1").bind(&id).bind(user_id).bind(amount).bind(note).fetch_one(&mut *tx).await.map_err(failure)?;
+            if !matches {
+                return Err(AdminStoreError::new(
+                    AdminStoreErrorKind::DuplicateName,
+                    "portal",
+                    "充值编号已用于另一笔操作",
+                ));
+            }
+        }
+        tx.commit().await.map_err(failure)
+    }
+    async fn change_password(
+        &self,
+        id: &str,
+        session_version: i64,
+        password_hash: &str,
+    ) -> AdminStoreResult<bool> {
+        let changed = sqlx::query("update portal_users set password_hash=$3,session_version=session_version+1,updated_at=now() where id=$1 and session_version=$2 and enabled")
+            .bind(id).bind(session_version).bind(password_hash).execute(&self.pool).await.map_err(failure)?.rows_affected();
+        Ok(changed == 1)
+    }
     async fn own_keys(
         &self,
         user_id: &str,

@@ -4,6 +4,38 @@ use chrono::{DateTime, Utc};
 
 use super::AdminError;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WalletPolicy {
+    pub balance_enforced: bool,
+    pub daily_limit_usd: String,
+    pub weekly_limit_usd: String,
+    pub max_concurrency: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalWallet {
+    pub user_id: String,
+    pub balance_usd: String,
+    pub total_spent_usd: String,
+    pub daily_used_usd: String,
+    pub weekly_used_usd: String,
+    pub active_requests: i64,
+    #[serde(flatten)]
+    pub policy: WalletPolicy,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletEvent {
+    pub id: String,
+    pub kind: String,
+    pub amount_usd: String,
+    pub note: String,
+    pub created_at: DateTime<Utc>,
+}
+
 /// 只向所属用户返回密钥；不派生 Debug，避免令牌进入日志。
 pub struct PortalKey {
     pub id: String,

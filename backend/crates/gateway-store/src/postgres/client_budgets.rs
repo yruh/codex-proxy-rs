@@ -160,6 +160,24 @@ async fn settle_in_transaction(
     .await?
     .rows_affected();
     if changed == 1 {
+        // 用户费用按准入时固定的归属独立记账；充值与扣费共用钱包行锁。
+        let owner: Option<String> =
+            sqlx::query_scalar("select user_id from portal_user_requests where request_id=$1")
+                .bind(charge.request_id.as_str())
+                .fetch_optional(&mut **tx)
+                .await?;
+        if let Some(owner) = owner {
+            sqlx::query("select user_id from portal_wallets where user_id=$1 for update")
+                .bind(&owner)
+                .fetch_one(&mut **tx)
+                .await?;
+            let charged=sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,created_at) values($1,$2,'usage',-$3::text::numeric,$4) on conflict(id) do nothing")
+                .bind(format!("usage:{}",charge.request_id.as_str())).bind(&owner).bind(charge.amount_usd.canonical()).bind(DateTime::<Utc>::from(charge.completed_at)).execute(&mut **tx).await?.rows_affected();
+            if charged == 1 {
+                sqlx::query("update portal_wallets set balance_usd=balance_usd-$2::text::numeric,total_spent_usd=total_spent_usd+$2::text::numeric,updated_at=now() where user_id=$1")
+                    .bind(&owner).bind(charge.amount_usd.canonical()).execute(&mut **tx).await?;
+            }
+        }
         sqlx::query("update client_key_budget_windows set
                 daily_used_usd = daily_used_usd + case when $3 >= daily_start and $3 < daily_end then $2::text::numeric else 0 end,
                 weekly_used_usd = weekly_used_usd + case when $3 >= weekly_start and $3 < weekly_end then $2::text::numeric else 0 end

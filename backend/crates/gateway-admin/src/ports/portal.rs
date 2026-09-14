@@ -10,6 +10,30 @@ use crate::model::{
 
 #[async_trait]
 pub trait PortalStore: Send + Sync {
+    async fn wallet(&self, user_id: &str) -> AdminStoreResult<crate::model::portal::PortalWallet>;
+    async fn wallet_events(
+        &self,
+        user_id: &str,
+    ) -> AdminStoreResult<Vec<crate::model::portal::WalletEvent>>;
+    async fn set_wallet_policy(
+        &self,
+        user_id: &str,
+        policy: crate::model::portal::WalletPolicy,
+    ) -> AdminStoreResult<()>;
+    async fn credit_wallet(
+        &self,
+        user_id: &str,
+        operation_id: &str,
+        amount: &str,
+        note: &str,
+    ) -> AdminStoreResult<()>;
+    /// 只有验证密码时的会话版本仍有效，才允许更新，避免覆盖管理员同时进行的重置。
+    async fn change_password(
+        &self,
+        id: &str,
+        session_version: i64,
+        password_hash: &str,
+    ) -> AdminStoreResult<bool>;
     async fn own_keys(&self, user_id: &str) -> AdminStoreResult<Vec<PortalKey>>;
     async fn own_usage(
         &self,

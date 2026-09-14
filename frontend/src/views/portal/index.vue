@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PortalKey, PortalUsage, PortalUser } from '@/api/modules/portal'
+import type { PortalKey, PortalUsage, PortalUser, WalletResponse } from '@/api/modules/portal'
 import { onMounted, ref } from 'vue'
 import { portalRequest } from '@/api/modules/portal'
 
@@ -10,21 +10,41 @@ const error = ref('')
 const busy = ref(false)
 const keys = ref<PortalKey[]>([])
 const rows = ref<PortalUsage[]>([])
+const walletData = ref<WalletResponse | null>(null)
 const revealed = ref<string[]>([])
 const days = ref(7)
 const page = ref(1)
+const oldPassword = ref('')
+const newPassword = ref('')
+const confirmPassword = ref('')
+const notice = ref('')
+async function changePassword() {
+  await action(async () => {
+    if (newPassword.value !== confirmPassword.value)
+      throw new Error('两次输入的新密码不一致')
+    await portalRequest('/api/portal/password', { oldPassword: oldPassword.value, newPassword: newPassword.value })
+    oldPassword.value = newPassword.value = confirmPassword.value = ''
+    user.value = null
+    keys.value = []
+    rows.value = []
+    revealed.value = []
+    notice.value = '密码已修改，所有旧登录已失效，请使用新密码登录。'
+  })
+}
 const fmt = (n: number | null) => n == null ? '—' : n.toLocaleString('zh-CN')
 
 async function load() {
   const end = new Date()
   const start = new Date(end.getTime() - days.value * 86400000)
   const query = new URLSearchParams({ startTime: start.toISOString(), endTime: end.toISOString(), page: String(page.value) })
-  const [keyData, usageData] = await Promise.all([
+  const [keyData, usageData, wallet] = await Promise.all([
     portalRequest<{ items: PortalKey[] }>('/api/portal/keys'),
     portalRequest<{ items: PortalUsage[] }>(`/api/portal/usage?${query}`),
+    portalRequest<WalletResponse>('/api/portal/wallet'),
   ])
   keys.value = keyData.items
   rows.value = usageData.items
+  walletData.value = wallet
 }
 async function action(work: () => Promise<void>) {
   if (busy.value)
@@ -77,6 +97,9 @@ onMounted(async () => {
     <p v-if="error" role="alert" class="error">
       {{ error }}
     </p>
+    <p v-if="notice" role="status">
+      {{ notice }}
+    </p>
     <form v-if="!user" class="card login" @submit.prevent="login">
       <h2>欢迎回来</h2><p>登录查看分配给你的密钥和调用记录。</p>
       <label for="portal-field-1">用户名<input id="portal-field-1" v-model="username" required autocomplete="username" maxlength="100"></label>
@@ -86,6 +109,26 @@ onMounted(async () => {
       </button>
     </form>
     <template v-else>
+      <section v-if="walletData" class="card">
+        <h2>我的余额 · ${{ walletData.wallet.balanceUsd }}</h2>
+        <p>累计消费 ${{ walletData.wallet.totalSpentUsd }} · {{ walletData.wallet.balanceEnforced ? '余额不足后暂停新请求' : '未开启余额限制' }}</p>
+        <p>今日 ${{ walletData.wallet.dailyUsedUsd }} / {{ Number(walletData.wallet.dailyLimitUsd) ? `$${walletData.wallet.dailyLimitUsd}` : '不限' }} · 本周 ${{ walletData.wallet.weeklyUsedUsd }} / {{ Number(walletData.wallet.weeklyLimitUsd) ? `$${walletData.wallet.weeklyLimitUsd}` : '不限' }}</p>
+        <p>共享并发 {{ walletData.wallet.activeRequests }} / {{ walletData.wallet.maxConcurrency || '不限' }}。所有密钥共享；日／周按北京时间重置，进行中的请求按实际费用结算。</p>
+        <details>
+          <summary>充值与扣费流水（最近 100 笔）</summary><p v-for="event in walletData.events" :key="event.id">
+            {{ new Date(event.createdAt).toLocaleString() }} · {{ event.kind === 'credit' ? '充值' : '扣费' }} ${{ event.amountUsd }} · {{ event.note }}
+          </p>
+        </details>
+      </section>
+      <form class="card" @submit.prevent="changePassword">
+        <h2>修改密码</h2>
+        <label for="old-password">当前密码<input id="old-password" v-model="oldPassword" type="password" autocomplete="current-password" required maxlength="1024"></label>
+        <label for="new-password">新密码<input id="new-password" v-model="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"></label>
+        <label for="confirm-password">确认新密码<input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="1024"></label>
+        <p>至少 12 个字符。修改后需要重新登录。</p><button :disabled="busy">
+          修改密码
+        </button>
+      </form>
       <section class="card">
         <h2>我的密钥</h2><p v-if="!keys.length">
           管理员尚未分配密钥。

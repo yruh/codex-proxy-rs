@@ -153,8 +153,9 @@ pub async fn initialize(mut config: StoreConfig) -> StoreResult<StoreBundle> {
             redis_connection.clone(),
             REDIS_NAMESPACE,
         )?);
-    let (admissions, admission_release_writer) =
-        redis::BufferedClientAdmissionPort::new(admissions);
+    let (admissions, admission_release_writer) = redis::BufferedClientAdmissionPort::new(Arc::new(
+        postgres::PgPortalAdmission::new(pool.clone(), admissions),
+    ));
     let (circuits, circuit_feedback_writer) = redis::BufferedProviderCircuitPort::new(circuits);
     let core_ports = CoreStorePorts::new(
         execution,

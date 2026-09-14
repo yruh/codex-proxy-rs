@@ -28,8 +28,13 @@ where
         .route("/api/portal/login", post(login::<S>))
         .route("/api/portal/status", get(status::<S>))
         .route("/api/portal/logout", post(logout::<S>))
+        .route("/api/portal/password", post(change_password::<S>))
         .route("/api/portal/keys", get(keys::<S>))
         .route("/api/portal/usage", get(usage::<S>))
+        .route("/api/portal/wallet", get(own_wallet::<S>))
+        .route("/api/admin/portal/wallet", get(wallet::<S>))
+        .route("/api/admin/portal/wallet/policy", post(wallet_policy::<S>))
+        .route("/api/admin/portal/wallet/credit", post(wallet_credit::<S>))
         .route(
             "/api/admin/portal/users",
             get(users::<S>).post(create_user::<S>),
@@ -39,6 +44,82 @@ where
 }
 fn view(user: PortalUser) -> Value {
     json!({"id":user.id,"username":user.username,"enabled":user.enabled})
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WalletQuery {
+    user_id: String,
+}
+async fn own_wallet<S: AdminSessionState + Send + Sync>(
+    State(state): State<S>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AdminError> {
+    let service = state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?;
+    let user = service
+        .current_user(cookie(&headers))
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(
+        json!({"wallet":service.wallet(&user.id).await.map_err(map_admin_service_error)?,"events":service.wallet_events(&user.id).await.map_err(map_admin_service_error)?}),
+    ))
+}
+async fn wallet<S: AdminSessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    super::AdminQuery(query): super::AdminQuery<WalletQuery>,
+) -> Result<impl IntoResponse, AdminError> {
+    let service = state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?;
+    Ok(ok(
+        json!({"wallet":service.wallet(&query.user_id).await.map_err(map_admin_service_error)?,"events":service.wallet_events(&query.user_id).await.map_err(map_admin_service_error)?}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WalletPolicyBody {
+    user_id: String,
+    policy: gateway_admin::model::portal::WalletPolicy,
+}
+async fn wallet_policy<S: AdminSessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(body): AdminJson<WalletPolicyBody>,
+) -> Result<impl IntoResponse, AdminError> {
+    state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .set_wallet_policy(&body.user_id, body.policy)
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(json!({})))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WalletCredit {
+    user_id: String,
+    operation_id: String,
+    amount: String,
+    note: String,
+}
+async fn wallet_credit<S: AdminSessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(body): AdminJson<WalletCredit>,
+) -> Result<impl IntoResponse, AdminError> {
+    state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .credit_wallet(&body.user_id, &body.operation_id, &body.amount, &body.note)
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(json!({})))
 }
 fn cookie(headers: &HeaderMap) -> &str {
     headers
@@ -102,6 +183,34 @@ async fn logout<S: AdminSessionState + Send + Sync>(
         .portal()
         .map_err(map_admin_service_error)?
         .logout(cookie(&headers))
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok((
+        [(
+            SET_COOKIE,
+            HeaderValue::from_static(
+                "cpr_portal_session=; Path=/api/portal; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+            ),
+        )],
+        ok(json!({})),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChangePassword {
+    old_password: String,
+    new_password: String,
+}
+async fn change_password<S: AdminSessionState + Send + Sync>(
+    State(state): State<S>,
+    headers: HeaderMap,
+    AdminJson(body): AdminJson<ChangePassword>,
+) -> Result<impl IntoResponse, AdminError> {
+    state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .change_password(cookie(&headers), body.old_password, body.new_password)
         .await
         .map_err(map_admin_service_error)?;
     Ok((
