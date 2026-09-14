@@ -95,6 +95,7 @@ fn test_tree_should_match_frozen_rust_mirror() {
         "tests/admin/accounts/mod.rs",
         "tests/admin/accounts/presenter.rs",
         "tests/admin/auth.rs",
+        "tests/admin/portal.rs",
         "tests/admin/client_keys.rs",
         "tests/admin/errors.rs",
         "tests/admin/mod.rs",

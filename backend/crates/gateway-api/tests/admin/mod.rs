@@ -81,6 +81,7 @@ mod auth;
 mod client_keys;
 mod errors;
 mod observability;
+mod portal;
 mod proxies;
 mod settings;
 mod system;

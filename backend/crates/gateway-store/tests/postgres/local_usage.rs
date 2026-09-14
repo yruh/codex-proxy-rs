@@ -53,10 +53,7 @@ async fn local_usage_revisions_tombstones_and_revocation_are_enforced() {
         start: now - Duration::hours(1),
         end: now + Duration::hours(1),
     };
-    let rows = store
-        .daily_usage(range.clone(), Some("account"))
-        .await
-        .unwrap();
+    let rows = store.daily_usage(range, Some("account")).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].requests, 1);
     assert_eq!(rows[0].input, "100");
@@ -64,7 +61,7 @@ async fn local_usage_revisions_tombstones_and_revocation_are_enforced() {
     assert_eq!(rows[0].estimated_usd.as_deref(), Some("0.123456789012"));
     assert!(
         store
-            .daily_usage(range.clone(), Some("other-account"))
+            .daily_usage(range, Some("other-account"))
             .await
             .unwrap()
             .is_empty()

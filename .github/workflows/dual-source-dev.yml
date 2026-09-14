@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: dual-source-dev-${{ github.ref }}
-  cancel-in-progress: true
+  group: dual-source-dev-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   quality:
@@ -20,6 +20,7 @@ jobs:
       run_backend: true
       run_frontend: true
   container:
+    needs: quality
     permissions:
       contents: read
       security-events: write

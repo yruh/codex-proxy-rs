@@ -10,6 +10,9 @@ inputs:
   artifact-name:
     description: Unique diagnostics artifact name within the workflow run
     required: true
+  dual-source-smoke:
+    description: Run isolated dual-source HTTP checks
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -181,6 +184,16 @@ runs:
           echo "container logs contain a warning or error severity" >&2
           exit 1
         fi
+
+    - name: Verify dual-source HTTP isolation
+      if: inputs.dual-source-smoke == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        compose=(docker compose --project-name "$COMPOSE_PROJECT_NAME" -f deploy/compose.yaml)
+        "${compose[@]}" up -d --no-build --wait codex-proxy-rs
+        python3 scripts/verify-dual-source.py
+        "${compose[@]}" stop --timeout 30 codex-proxy-rs
 
     - name: Collect container diagnostics
       if: always()
