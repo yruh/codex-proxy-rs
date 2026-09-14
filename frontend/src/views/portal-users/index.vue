@@ -13,7 +13,6 @@ import BaseModal from '@/components/base/BaseModal/index.vue'
 import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
-import PortalWeeklyQuota from '@/components/PortalWeeklyQuota.vue'
 
 const availableKeys = ref<{ id: string, name: string }[]>([])
 const users = ref<PortalUser[]>([])
@@ -298,7 +297,6 @@ onMounted(() => action(load))
         <div class="rounded-cp bg-cp-info-container p-3 text-sm text-cp-info-on-container">
           余额为零或负数时自动拒绝新请求，充值后恢复使用。
         </div>
-        <PortalWeeklyQuota :wallet="walletData.wallet" />
         <form class="space-y-4" @submit.prevent="recharge">
           <h3 class="font-bold">
             充值余额
