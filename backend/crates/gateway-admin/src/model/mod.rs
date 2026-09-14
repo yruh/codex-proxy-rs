@@ -10,6 +10,7 @@ pub mod client_distribution;
 pub mod client_keys;
 pub mod local_usage;
 pub mod observability;
+pub mod portal;
 pub mod provider_credentials;
 pub mod proxies;
 pub mod quota_forecast;
