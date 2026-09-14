@@ -1,0 +1,21 @@
+name: Dual Source Development
+
+on:
+  push:
+    branches: [feat/dual-source-usage]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dual-source-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    uses: ./.github/workflows/_quality.yml
+    with:
+      ref: ${{ github.sha }}
+      run_backend: true
+      run_frontend: true
