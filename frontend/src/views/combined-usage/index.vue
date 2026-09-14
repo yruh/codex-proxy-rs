@@ -16,20 +16,40 @@ const deviceName = ref('我的电脑')
 const deviceAccount = ref('')
 const newToken = ref('')
 const updated = ref('')
+const loaded = ref(false)
 const cards = computed(() => ['local', 'proxy', 'all'].map((source) => {
   const selected = rows.value.filter(r => source === 'all' || r.source === source)
   return { source, tokens: selected.reduce((s, r) => s + BigInt(r.inputTokens) + BigInt(r.outputTokens), 0n).toLocaleString('zh-CN'), requests: selected.reduce((s, r) => s + r.requests, 0), usd: selected.reduce((s, r) => s + Number(r.estimatedUsd || 0), 0), priced: selected.reduce((s, r) => s + r.pricedRequests, 0) }
 }))
 const label = (source: string) => ({ local: '本地直连', proxy: '服务器代理', all: '合计' })[source] || source
+async function loadAccounts() {
+  const items: { id: string, name: string }[] = []
+  for (let page = 1; ; page++) {
+    const result = await getAccounts({ page, pageSize: 200 })
+    items.push(...result.items)
+    if (page >= result.page.totalPages || !result.items.length)
+      break
+  }
+  accounts.value = items
+}
 async function load() {
   const end = new Date()
   const start = new Date(end.getTime() - days.value * 86400000)
   const query = new URLSearchParams({ startTime: start.toISOString(), endTime: end.toISOString() })
   if (accountId.value)
     query.set('accountId', accountId.value)
-  rows.value = (await portalRequest<{ items: Daily[] }>(`/api/admin/usage/combined?${query}`)).items
-  devices.value = (await portalRequest<{ items: Device[] }>('/api/admin/sync/devices')).items
-  updated.value = new Date().toLocaleTimeString()
+  const results = await Promise.allSettled([
+    portalRequest<{ items: Daily[] }>(`/api/admin/usage/combined?${query}`).then((result) => {
+      rows.value = result.items
+      loaded.value = true
+      updated.value = new Date().toLocaleTimeString()
+    }),
+    portalRequest<{ items: Device[] }>('/api/admin/sync/devices').then((result) => { devices.value = result.items }),
+    loadAccounts(),
+  ])
+  const failure = results.find(result => result.status === 'rejected')
+  if (failure?.status === 'rejected')
+    throw failure.reason
 }
 async function action(work: () => Promise<void>) {
   if (busy.value)
@@ -55,17 +75,14 @@ async function toggle(d: Device) {
     await load()
   })
 }
-onMounted(() => action(async () => {
-  accounts.value = (await getAccounts({ page: 1, pageSize: 1000 })).items
-  await load()
-}))
+onMounted(() => action(load))
 </script>
 
 <template>
   <main class="combined">
     <header><div><h1>双端合并统计</h1><p>本地直连与服务器代理分别记账，共享账号额度不相加。</p></div><span v-if="updated">更新于 {{ updated }}</span></header>
     <p v-if="error" role="alert">
-      {{ error }}；当前内容可能为上次加载的数据。
+      {{ error }}；部分内容未加载，请重试。
     </p>
     <div class="toolbar">
       <label for="combined-account">上游账号<select id="combined-account" v-model="accountId" :disabled="busy" @change="action(load)"><option value="">全部账号</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select></label><label for="combined-period">时间<select id="combined-period" v-model="days" :disabled="busy" @change="action(load)"><option :value="1">最近一天</option><option :value="7">最近一周</option><option :value="30">最近一月</option><option :value="365">最近一年</option></select></label><button :disabled="busy" @click="action(load)">
@@ -74,7 +91,7 @@ onMounted(() => action(async () => {
     </div>
     <div class="cards">
       <section v-for="card in cards" :key="card.source">
-        <h2>{{ label(card.source) }}</h2><strong class="number">{{ card.tokens }}</strong><p>tokens · {{ card.requests }} 次响应</p><p>API 等价 {{ card.priced ? `$${card.usd.toFixed(4)}` : '—' }} · 已计价 {{ card.priced }}/{{ card.requests }}</p>
+        <h2>{{ label(card.source) }}</h2><strong class="number">{{ loaded ? card.tokens : '—' }}</strong><p>tokens · {{ loaded ? card.requests : '—' }} 次响应</p><p>API 等价 {{ card.priced ? `$${card.usd.toFixed(4)}` : '—' }} · 已计价 {{ loaded ? `${card.priced}/${card.requests}` : '—' }}</p>
       </section>
     </div>
     <section>
@@ -87,7 +104,7 @@ onMounted(() => action(async () => {
           </tbody>
         </table>
       </div><p v-if="!rows.length">
-        当前范围没有已同步的用量。
+        {{ loaded ? '当前范围没有已同步的用量。' : '用量尚未加载。' }}
       </p>
     </section>
     <section>
