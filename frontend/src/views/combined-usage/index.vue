@@ -157,7 +157,9 @@ onMounted(() => action(load))
         <div v-for="window in account.quota.windows" :key="window.key">
           <div class="toolbar">
             <span>{{ window.labelDisplay }} · {{ window.windowLabelDisplay }}</span><strong>{{ window.usedPercentDisplay }}</strong>
-          </div><label :for="`quota-${account.id}-${window.key}`">额度已用</label><progress :id="`quota-${account.id}-${window.key}`" :value="window.usedPercent ?? undefined" max="100" /><p>重置 {{ window.resetAtDisplay }}</p>
+          </div><div class="quota-meter" role="progressbar" :aria-label="window.labelDisplay" :aria-valuenow="window.usedPercent ?? undefined" :aria-valuemin="0" :aria-valuemax="100">
+            <span :style="{ width: `${Math.max(0, Math.min(100, window.usedPercent ?? 0))}%` }" />
+          </div><p>重置 {{ window.resetAtDisplay }}</p>
         </div>
         <p v-if="!account.quota.windows.length">
           暂无额度观测数据
@@ -247,10 +249,15 @@ onMounted(() => action(load))
   padding: 16px 0;
   border-bottom: 1px solid var(--cp-color-border);
 }
-progress {
+.quota-meter {
   width: 100%;
   height: 9px;
-  accent-color: #269165;
+  background: var(--cp-color-bg-layout);
+}
+.quota-meter span {
+  display: block;
+  height: 9px;
+  background: #269165;
 }
 .combined {
   padding: 28px;
