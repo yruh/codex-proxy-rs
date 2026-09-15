@@ -38,6 +38,8 @@ const password = ref('')
 const error = ref('')
 const busy = ref(false)
 const keys = ref<PortalKey[]>([])
+const showDeleteKey = ref(false)
+const deletingKey = ref<PortalKey | null>(null)
 const rows = ref<PortalUsage[]>([])
 const walletData = ref<WalletResponse | null>(null)
 const revealed = ref<string[]>([])
@@ -47,6 +49,17 @@ const oldPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 const notice = ref('')
+async function deleteKey() {
+  await action(async () => {
+    const id = deletingKey.value!.id
+    await portalRequest('/api/portal/keys/delete', { id })
+    keys.value = keys.value.filter(key => key.id !== id)
+    revealed.value = revealed.value.filter(keyId => keyId !== id)
+    showDeleteKey.value = false
+    deletingKey.value = null
+    notice.value = '密钥已删除，历史用量与扣费记录保留。'
+  })
+}
 async function createKey() {
   await action(async () => {
     const created = await portalRequest<PortalKey>('/api/portal/keys', { name: keyName.value })
@@ -228,9 +241,14 @@ onMounted(async () => {
               <div class="flex items-center gap-3">
                 <strong>{{ key.name }}</strong><span class="text-xs" :class="key.enabled ? 'text-cp-success-text' : 'text-cp-text-tertiary'">{{ key.enabled ? '可用' : '已停用' }}</span>
               </div><code class="mt-2 block break-all text-sm text-cp-text-secondary">{{ revealed.includes(key.id) ? key.key : '••••••••••••••••••••••••' }}</code>
-            </div><BaseButton size="sm" @click="toggle(key.id)">
-              {{ revealed.includes(key.id) ? '隐藏' : '显示密钥' }}
-            </BaseButton>
+            </div><div class="flex gap-2">
+              <BaseButton size="sm" @click="toggle(key.id)">
+                {{ revealed.includes(key.id) ? '隐藏' : '显示密钥' }}
+              </BaseButton>
+              <BaseButton size="sm" :disabled="busy" @click="deletingKey = key; showDeleteKey = true; error = ''">
+                删除密钥
+              </BaseButton>
+            </div>
           </div>
         </BaseCard>
         <BaseCard title="我的调用记录" description="费用为实际钱包扣费，已包含管理员设置的倍率；缓存已包含在输入中">
@@ -269,6 +287,20 @@ onMounted(async () => {
             取消
           </BaseButton><BaseButton type="submit" form="change-password" variant="primary" :loading="busy">
             修改密码
+          </BaseButton>
+        </template>
+      </BaseModal>
+      <BaseModal v-model="showDeleteKey" title="删除密钥" description="删除后无法恢复；历史用量与扣费记录保留" :dismissible="!busy">
+        <p>确认删除「{{ deletingKey?.name }}」？使用此密钥的客户端将无法发起新请求。</p>
+        <p v-if="error" role="alert" class="mt-3 text-cp-error-text">
+          {{ error }}
+        </p>
+        <template #footer>
+          <BaseButton :disabled="busy" @click="showDeleteKey = false">
+            取消
+          </BaseButton>
+          <BaseButton :loading="busy" @click="deleteKey">
+            确认删除密钥
           </BaseButton>
         </template>
       </BaseModal>

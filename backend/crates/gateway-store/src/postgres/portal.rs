@@ -41,6 +41,64 @@ fn user(row: &PgRow) -> Result<PortalUser, sqlx::Error> {
 
 #[async_trait]
 impl PortalStore for PgPortalStore {
+    async fn delete_user(&self, id: &str) -> AdminStoreResult<gateway_admin::model::Revision> {
+        let mut tx = self.pool.begin().await.map_err(failure)?;
+        let revision = super::bump_config_revision_in_transaction(&mut tx)
+            .await
+            .map_err(|_| {
+                AdminStoreError::new(AdminStoreErrorKind::Unavailable, "user", "删除用户失败")
+            })?;
+        let changed = sqlx::query("update portal_users set enabled=false,deleted_at=now(),session_version=session_version+1,updated_at=now() where id=$1 and deleted_at is null")
+            .bind(id).execute(&mut *tx).await.map_err(failure)?.rows_affected();
+        if changed == 0 {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::NotFound,
+                "user",
+                "用户不存在或已删除",
+            ));
+        }
+        sqlx::query("delete from client_api_keys where id in (select client_api_key_id from portal_key_owners where user_id=$1)")
+            .bind(id).execute(&mut *tx).await.map_err(failure)?;
+        sqlx::query("delete from portal_sessions where user_id=$1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failure)?;
+        tx.commit().await.map_err(failure)?;
+        Ok(revision)
+    }
+    async fn delete_own_key(
+        &self,
+        user: &PortalUser,
+        key_id: &str,
+    ) -> AdminStoreResult<gateway_admin::model::Revision> {
+        let mut tx = self.pool.begin().await.map_err(failure)?;
+        let revision = super::bump_config_revision_in_transaction(&mut tx)
+            .await
+            .map_err(|_| {
+                AdminStoreError::new(AdminStoreErrorKind::Unavailable, "key", "删除密钥失败")
+            })?;
+        let valid: Option<bool> = sqlx::query_scalar("select enabled and deleted_at is null and session_version=$2 from portal_users where id=$1 for update")
+            .bind(&user.id).bind(user.session_version).fetch_optional(&mut *tx).await.map_err(failure)?;
+        if valid != Some(true) {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Invalid,
+                "user",
+                "用户登录已失效",
+            ));
+        }
+        let changed = sqlx::query("delete from client_api_keys where id=$1 and exists(select 1 from portal_key_owners where client_api_key_id=$1 and user_id=$2)")
+            .bind(key_id).bind(&user.id).execute(&mut *tx).await.map_err(failure)?.rows_affected();
+        if changed == 0 {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::NotFound,
+                "key",
+                "密钥不存在或已删除",
+            ));
+        }
+        tx.commit().await.map_err(failure)?;
+        Ok(revision)
+    }
     async fn pricing(&self) -> AdminStoreResult<gateway_admin::model::portal::PortalPricing> {
         let value: serde_json::Value = sqlx::query_scalar(
             "select policy from portal_pricing_revisions order by id desc limit 1",
@@ -93,7 +151,7 @@ impl PortalStore for PgPortalStore {
             ));
         }
         let count: i64 =
-            sqlx::query_scalar("select count(*) from portal_key_owners where user_id=$1")
+            sqlx::query_scalar("select count(*) from portal_key_owners o join client_api_keys k on k.id=o.client_api_key_id where o.user_id=$1")
                 .bind(&user.id)
                 .fetch_one(&mut *tx)
                 .await
@@ -274,7 +332,7 @@ impl PortalStore for PgPortalStore {
             .map_err(failure)
     }
     async fn user_credentials(&self, username: &str) -> AdminStoreResult<Option<PortalCredential>> {
-        let row = sqlx::query("select id, username, enabled, session_version, password_hash from portal_users where username=$1")
+        let row = sqlx::query("select id, username, enabled, session_version, password_hash from portal_users where username=$1 and deleted_at is null")
             .bind(username).fetch_optional(&self.pool).await.map_err(failure)?;
         row.map(|r| {
             Ok(PortalCredential {
@@ -286,7 +344,7 @@ impl PortalStore for PgPortalStore {
         .map_err(failure)
     }
     async fn user(&self, id: &str) -> AdminStoreResult<Option<PortalUser>> {
-        sqlx::query("select id, username, enabled, session_version from portal_users where id=$1")
+        sqlx::query("select id, username, enabled, session_version from portal_users where id=$1 and deleted_at is null")
             .bind(id)
             .fetch_optional(&self.pool)
             .await
@@ -297,7 +355,7 @@ impl PortalStore for PgPortalStore {
             .map_err(failure)
     }
     async fn users(&self) -> AdminStoreResult<Vec<PortalUser>> {
-        sqlx::query("select id, username, enabled, session_version from portal_users order by username limit 1000")
+        sqlx::query("select id, username, enabled, session_version from portal_users where deleted_at is null order by username limit 1000")
             .fetch_all(&self.pool).await.map_err(failure)?.iter().map(user).collect::<Result<Vec<_>,_>>().map_err(failure)
     }
     async fn create_user(&self, credential: PortalCredential) -> AdminStoreResult<()> {
@@ -319,7 +377,7 @@ impl PortalStore for PgPortalStore {
         enabled: bool,
         password_hash: Option<&str>,
     ) -> AdminStoreResult<()> {
-        let n=sqlx::query("update portal_users set enabled=$2,password_hash=coalesce($3,password_hash),session_version=session_version+1,updated_at=now() where id=$1")
+        let n=sqlx::query("update portal_users set enabled=$2,password_hash=coalesce($3,password_hash),session_version=session_version+1,updated_at=now() where id=$1 and deleted_at is null")
             .bind(id).bind(enabled).bind(password_hash).execute(&self.pool).await.map_err(failure)?.rows_affected();
         if n == 0 {
             return Err(AdminStoreError::new(
@@ -362,8 +420,35 @@ impl PortalStore for PgPortalStore {
         Ok(())
     }
     async fn assign_key(&self, key_id: &str, user_id: &str) -> AdminStoreResult<()> {
+        let mut tx = self.pool.begin().await.map_err(failure)?;
+        // 与删除、创建密钥保持相同锁序，避免删除后重新产生归属。
+        super::bump_config_revision_in_transaction(&mut tx)
+            .await
+            .map_err(|_| {
+                AdminStoreError::new(AdminStoreErrorKind::Unavailable, "key", "绑定密钥失败")
+            })?;
+        let valid: Option<bool> = sqlx::query_scalar(
+            "select deleted_at is null from portal_users where id=$1 for update",
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(failure)?;
+        let key: Option<String> =
+            sqlx::query_scalar("select id from client_api_keys where id=$1 for update")
+                .bind(key_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(failure)?;
+        if valid != Some(true) || key.is_none() {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::NotFound,
+                "key",
+                "用户或密钥不存在",
+            ));
+        }
         let result = sqlx::query("insert into portal_key_owners(client_api_key_id,user_id) values($1,$2) on conflict(client_api_key_id) do update set user_id=excluded.user_id where portal_key_owners.user_id=excluded.user_id")
-            .bind(key_id).bind(user_id).execute(&self.pool).await.map_err(failure)?;
+            .bind(key_id).bind(user_id).execute(&mut *tx).await.map_err(failure)?;
         // 密钥携带历史记录，不能把原用户的历史用量静默转给另一个用户。
         if result.rows_affected() == 0 {
             return Err(AdminStoreError::new(
@@ -372,6 +457,7 @@ impl PortalStore for PgPortalStore {
                 "该密钥已属于其他用户，请为新用户创建独立密钥",
             ));
         }
+        tx.commit().await.map_err(failure)?;
         Ok(())
     }
     async fn owned_key_ids(&self, user_id: &str) -> AdminStoreResult<Vec<String>> {

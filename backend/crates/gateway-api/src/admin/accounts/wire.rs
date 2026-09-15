@@ -353,6 +353,7 @@ pub struct AccountQuotaWindowView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_usage: Option<serde_json::Value>,
     pub reset_at_display: String,
+    pub reset_at: Option<String>,
 }
 
 /// 账号观测用量。

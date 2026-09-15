@@ -10,6 +10,12 @@ use crate::model::{
 
 #[async_trait]
 pub trait PortalStore: Send + Sync {
+    async fn delete_user(&self, id: &str) -> AdminStoreResult<crate::model::Revision>;
+    async fn delete_own_key(
+        &self,
+        user: &PortalUser,
+        key_id: &str,
+    ) -> AdminStoreResult<crate::model::Revision>;
     async fn pricing(&self) -> AdminStoreResult<crate::model::portal::PortalPricing>;
     async fn set_pricing(
         &self,

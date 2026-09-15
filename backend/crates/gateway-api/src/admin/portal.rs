@@ -30,6 +30,8 @@ where
         .route("/api/portal/logout", post(logout::<S>))
         .route("/api/portal/password", post(change_password::<S>))
         .route("/api/portal/keys", get(keys::<S>).post(create_own_key::<S>))
+        .route("/api/portal/keys/delete", post(delete_own_key::<S>))
+        .route("/api/admin/portal/users/delete", post(delete_user::<S>))
         .route(
             "/api/admin/portal/pricing",
             get(pricing::<S>).post(set_pricing::<S>),
@@ -48,6 +50,39 @@ where
 }
 fn view(user: PortalUser) -> Value {
     json!({"id":user.id,"username":user.username,"enabled":user.enabled})
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteId {
+    id: String,
+}
+async fn delete_user<S: AdminSessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(body): AdminJson<DeleteId>,
+) -> Result<impl IntoResponse, AdminError> {
+    state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .delete_user(&body.id)
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(json!({})))
+}
+async fn delete_own_key<S: AdminSessionState + Send + Sync>(
+    State(state): State<S>,
+    headers: HeaderMap,
+    AdminJson(body): AdminJson<DeleteId>,
+) -> Result<impl IntoResponse, AdminError> {
+    state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .delete_key(cookie(&headers), &body.id)
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(json!({})))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -28,6 +28,19 @@ pub struct PortalService {
 }
 
 impl PortalService {
+    pub async fn delete_user(&self, id: &str) -> Result<(), AdminError> {
+        let revision = self.store.delete_user(id).await.map_err(store_error)?;
+        super::publish_committed(self.snapshot.as_ref(), revision).await
+    }
+    pub async fn delete_key(&self, token: &str, key_id: &str) -> Result<(), AdminError> {
+        let user = self.current_user(token).await?;
+        let revision = self
+            .store
+            .delete_own_key(&user, key_id)
+            .await
+            .map_err(store_error)?;
+        super::publish_committed(self.snapshot.as_ref(), revision).await
+    }
     pub async fn pricing(&self) -> Result<crate::model::portal::PortalPricing, AdminError> {
         self.store.pricing().await.map_err(store_error)
     }

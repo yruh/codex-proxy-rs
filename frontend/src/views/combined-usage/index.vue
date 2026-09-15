@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { Account } from '@/api/modules/accounts'
+import type { Account, AccountQuotaWindow } from '@/api/modules/accounts'
 import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
 import { Download, Laptop, Plus, RefreshCw, Server, Sigma } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
-import { getAccounts } from '@/api/modules/accounts'
+import { getAccountQuotaForecast, getAccounts } from '@/api/modules/accounts'
 import { portalRequest } from '@/api/modules/portal'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -32,16 +32,19 @@ const devices = ref<Device[]>([])
 const accounts = ref<Account[]>([])
 const accountId = ref('')
 const days = ref(7)
+const rangeStart = ref(new Date())
+const remainingPercent = (window: AccountQuotaWindow) => window.usedPercent === null || (window.resetAt && new Date(window.resetAt).getTime() <= Date.now()) ? null : Math.max(0, Math.min(100, 100 - window.usedPercent))
 const label = (source: string) => ({ local: '本地直连', proxy: '服务器代理', all: '合计' })[source] || source
 const sourceFilter = ref('all')
 const selectedDay = ref('')
 const metric = ref<'tokens' | 'cost' | 'requests'>('tokens')
 const dayKey = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+const calendarDays = computed(() => days.value || Math.max(1, Math.ceil((Date.now() - new Date(`${dayKey(rangeStart.value)}T00:00:00+08:00`).getTime()) / 86400000)))
 const filteredRows = computed(() => rows.value.filter(r => (sourceFilter.value === 'all' || r.source === sourceFilter.value) && (!selectedDay.value || r.day === selectedDay.value)))
 const calendar = computed(() => {
   const today = new Date(`${dayKey(new Date())}T00:00:00+08:00`)
-  return Array.from({ length: days.value }, (_, i) => {
-    const day = dayKey(new Date(today.getTime() - (days.value - 1 - i) * 86400000))
+  return Array.from({ length: calendarDays.value }, (_, i) => {
+    const day = dayKey(new Date(today.getTime() - (calendarDays.value - 1 - i) * 86400000))
     const values = rows.value.filter(r => r.day === day && (sourceFilter.value === 'all' || r.source === sourceFilter.value))
     return { day, local: values.filter(r => r.source === 'local').reduce((s, r) => s + metricValue(r), 0), proxy: values.filter(r => r.source === 'proxy').reduce((s, r) => s + metricValue(r), 0) }
   })
@@ -90,23 +93,53 @@ async function loadAccounts() {
 }
 async function load() {
   const end = new Date()
-  const start = new Date(new Date(`${dayKey(end)}T00:00:00+08:00`).getTime() - (days.value - 1) * 86400000)
   selectedDay.value = ''
-  const query = new URLSearchParams({ startTime: start.toISOString(), endTime: end.toISOString() })
-  if (accountId.value)
-    query.set('accountId', accountId.value)
-  const results = await Promise.allSettled([
-    portalRequest<{ items: Daily[] }>(`/api/admin/usage/combined?${query}`).then((result) => {
-      rows.value = result.items
-      loaded.value = true
-      updated.value = new Date().toLocaleTimeString()
-    }),
-    portalRequest<{ items: Device[] }>('/api/admin/sync/devices').then((result) => { devices.value = result.items }),
-    loadAccounts(),
-  ])
-  const failure = results.find(result => result.status === 'rejected')
-  if (failure?.status === 'rejected')
-    throw failure.reason
+  loaded.value = false
+  rows.value = []
+  await loadAccounts()
+  let ranges = [{ id: accountId.value, start: new Date(new Date(`${dayKey(end)}T00:00:00+08:00`).getTime() - (days.value - 1) * 86400000), end }]
+  if (days.value === 0) {
+    const weeklyAccounts = scopedAccounts.value.filter(account => account.provider === 'openai')
+    if (!weeklyAccounts.length)
+      throw new Error('当前周限仅支持有上游周额度的 OpenAI 账号')
+    ranges = await Promise.all(weeklyAccounts.map(async (account) => {
+      const data = await getAccountQuotaForecast({ accountId: account.id })
+      const forecast = data.forecasts.find(item => item.period === 'weekly' && !item.extrapolated)
+      const reset = new Date(forecast?.source?.resetAt || '')
+      if (!forecast || !Number.isFinite(reset.getTime()) || reset <= end)
+        throw new Error(`${account.name} 缺少当前周限边界，请刷新上游额度后重试`)
+      const start = new Date(reset.getTime() - forecast.targetDays * 86400000)
+      if (start > end)
+        throw new Error(`${account.name} 周限边界无效`)
+      return { id: account.id, start, end }
+    }))
+  }
+  rangeStart.value = new Date(Math.min(...ranges.map(range => range.start.getTime())))
+  const results = await Promise.all(ranges.map(async (range) => {
+    const query = new URLSearchParams({ startTime: range.start.toISOString(), endTime: range.end.toISOString() })
+    if (range.id)
+      query.set('accountId', range.id)
+    return (await portalRequest<{ items: Daily[] }>(`/api/admin/usage/combined?${query}`)).items
+  }))
+  const merged = new Map<string, Daily>()
+  for (const row of results.flat()) {
+    const key = `${row.day}:${row.source}`
+    const previous = merged.get(key)
+    if (!previous) {
+      merged.set(key, { ...row })
+      continue
+    }
+    previous.requests += row.requests
+    previous.pricedRequests += row.pricedRequests
+    for (const field of ['inputTokens', 'outputTokens', 'cachedTokens'] as const)
+      previous[field] = String(BigInt(previous[field]) + BigInt(row[field]))
+    if (row.estimatedUsd !== null)
+      previous.estimatedUsd = String(Number(previous.estimatedUsd || 0) + Number(row.estimatedUsd))
+  }
+  rows.value = [...merged.values()].sort((a, b) => a.day.localeCompare(b.day) || a.source.localeCompare(b.source))
+  loaded.value = true
+  updated.value = new Date().toLocaleTimeString()
+  devices.value = (await portalRequest<{ items: Device[] }>('/api/admin/sync/devices')).items
 }
 async function action(work: () => Promise<void>) {
   if (busy.value)
@@ -161,7 +194,7 @@ onMounted(() => action(load))
           <BaseSelect v-model="accountId" :disabled="busy" :options="[{ label: '全部账号', value: '' }, ...accounts.map(a => ({ label: a.name, value: a.id }))]" @update:model-value="action(load)" />
         </FormItem>
         <FormItem label="时间范围" class="min-w-36">
-          <BaseSelect :model-value="String(days)" :disabled="busy" :options="[{ label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }, { label: '最近一年', value: '365' }]" @update:model-value="days = Number($event); action(load)" />
+          <BaseSelect :model-value="String(days)" :disabled="busy" :options="[{ label: '当前周限', value: '0' }, { label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }, { label: '最近一年', value: '365' }]" @update:model-value="days = Number($event); action(load)" />
         </FormItem>
         <FormItem label="数据来源" class="min-w-40">
           <BaseSelect v-model="sourceFilter" :options="[{ label: '双端合计', value: 'all' }, { label: '本地直连', value: 'local' }, { label: '服务器代理', value: 'proxy' }]" />
@@ -188,7 +221,7 @@ onMounted(() => action(load))
         </p>
       </BaseCard>
     </div>
-    <BaseCard title="用量趋势" :description="`${days} 天内 · ${activeDays} 个活跃日`">
+    <BaseCard title="用量趋势" :description="`${days === 0 ? '当前周限 · 各账号实际周期' : `${days} 天内`} · ${activeDays} 个活跃日`">
       <template #actions>
         <BaseSelect v-model="metric" :options="[{ label: 'Tokens', value: 'tokens' }, { label: 'API 等价 USD', value: 'cost' }, { label: '响应次数', value: 'requests' }]" aria-label="趋势指标" />
       </template>
@@ -237,10 +270,10 @@ onMounted(() => action(load))
           </p>
           <div v-for="window in account.quota.windows" :key="window.key" class="mt-4">
             <div class="mb-2 flex justify-between gap-3 text-xs">
-              <span class="text-cp-text-secondary">{{ window.labelDisplay }} · {{ window.windowLabelDisplay }}</span><strong>{{ window.usedPercentDisplay }}</strong>
+              <span class="text-cp-text-secondary">{{ window.labelDisplay === window.windowLabelDisplay ? window.labelDisplay : `${window.labelDisplay} · ${window.windowLabelDisplay}` }}</span><strong>{{ remainingPercent(window) === null ? '剩余未知' : `剩余 ${remainingPercent(window)!.toFixed(1)}%` }}</strong>
             </div>
-            <div class="h-1.5 overflow-hidden rounded-full bg-cp-fill-tertiary" role="progressbar" :aria-label="window.labelDisplay" :aria-valuenow="window.usedPercent ?? undefined" :aria-valuemin="0" :aria-valuemax="100">
-              <div class="h-full rounded-full bg-cp-primary" :style="{ width: `${Math.max(0, Math.min(100, window.usedPercent ?? 0))}%` }" />
+            <div class="h-1.5 overflow-hidden rounded-full bg-cp-fill-tertiary" role="progressbar" :aria-label="`${window.labelDisplay}剩余`" :aria-valuenow="remainingPercent(window) ?? undefined" :aria-valuemin="0" :aria-valuemax="100">
+              <div class="h-full rounded-full bg-cp-primary" :style="{ width: `${remainingPercent(window) ?? 0}%` }" />
             </div>
             <p class="mt-2 text-xs text-cp-text-tertiary">
               重置 {{ window.resetAtDisplay }}

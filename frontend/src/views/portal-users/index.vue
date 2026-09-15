@@ -30,6 +30,7 @@ const showCreate = ref(false)
 const showAssign = ref(false)
 const showWallet = ref(false)
 const showReset = ref(false)
+const showDelete = ref(false)
 const selectedUser = ref<PortalUser | null>(null)
 const walletData = ref<WalletResponse | null>(null)
 const policy = ref<WalletPolicy>({ dailyLimitUsd: '0', weeklyLimitUsd: '0', maxConcurrency: 0 })
@@ -131,6 +132,14 @@ async function toggle(user: PortalUser) {
     await load()
   })
 }
+async function deleteUser() {
+  await action(async () => {
+    await portalRequest('/api/admin/portal/users/delete', { id: selectedUser.value!.id })
+    showDelete.value = false
+    await load()
+    message.value = '用户已删除，登录和密钥已失效，历史账单保留'
+  })
+}
 async function reset() {
   await action(async () => {
     const user = selectedUser.value!
@@ -218,10 +227,27 @@ onMounted(() => action(load))
             <BaseButton variant="ghost" size="sm" :disabled="busy" @click="toggle(row)">
               {{ row.enabled ? '停用' : '启用' }}
             </BaseButton>
+            <BaseButton variant="ghost" size="sm" :disabled="busy" @click="selectedUser = row; showDelete = true; message = ''">
+              删除
+            </BaseButton>
           </div>
         </template>
       </BaseTable>
     </BaseCard>
+    <BaseModal v-model="showDelete" title="删除用户" description="删除后无法恢复登录身份；历史用量和账单保留" :dismissible="!busy">
+      <p>确认删除用户「{{ selectedUser?.username }}」？其全部密钥将失效，剩余余额不会自动退款或转移。</p>
+      <p v-if="message" role="alert" class="mt-3 text-cp-error-text">
+        {{ message }}
+      </p>
+      <template #footer>
+        <BaseButton :disabled="busy" @click="showDelete = false">
+          取消
+        </BaseButton>
+        <BaseButton :loading="busy" @click="deleteUser">
+          确认删除用户
+        </BaseButton>
+      </template>
+    </BaseModal>
     <BaseModal v-model="showCreate" title="创建用户" description="创建独立登录身份，初始余额为零" :dismissible="!busy">
       <form id="create-user" class="space-y-5" @submit.prevent="create">
         <FormItem label="用户名" required>

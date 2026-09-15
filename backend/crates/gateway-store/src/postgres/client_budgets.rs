@@ -132,8 +132,13 @@ impl PgClientBudgetStore {
         .fetch_optional(&mut *tx)
         .await
         .map_err(|_| ClientBudgetError)?;
-        let Some(key) = key else { return Ok(()) }; // 删除 Key 时也会删除其费用记录。
-        settle_in_transaction(&mut tx, &key, charge)
+        if let Some(key) = key {
+            settle_in_transaction(&mut tx, &key, charge)
+                .await
+                .map_err(|_| ClientBudgetError)?;
+        }
+        // 钱包归属在准入时固定；删除密钥后已开始的请求仍须结算。
+        settle_portal_wallet(&mut tx, charge)
             .await
             .map_err(|_| ClientBudgetError)?;
         tx.commit().await.map_err(|_| ClientBudgetError)
@@ -160,39 +165,46 @@ async fn settle_in_transaction(
     .await?
     .rows_affected();
     if changed == 1 {
-        // 用户费用按准入时固定的归属独立记账；充值与扣费共用钱包行锁。
-        let owner: Option<String> =
-            sqlx::query_scalar("select user_id from portal_user_requests where request_id=$1")
-                .bind(charge.request_id.as_str())
-                .fetch_optional(&mut **tx)
-                .await?;
-        if let Some(owner) = owner {
-            // 使用准入时固定的规则版本，模型覆盖全局倍率，不叠乘；重试始终使用同一版本。
-            let multiplier:String=sqlx::query_scalar("select coalesce(p.policy->'modelMultipliers'->>$2,p.policy->>'globalMultiplier','1') from portal_user_requests r join portal_pricing_revisions p on p.id=r.pricing_revision where r.request_id=$1")
-                .bind(charge.request_id.as_str()).bind(&charge.model_id).fetch_one(&mut **tx).await?;
-            let billed: String =
-                sqlx::query_scalar("select round($1::text::numeric*$2::text::numeric,8)::text")
-                    .bind(charge.amount_usd.canonical())
-                    .bind(&multiplier)
-                    .fetch_one(&mut **tx)
-                    .await?;
-            sqlx::query("select user_id from portal_wallets where user_id=$1 for update")
-                .bind(&owner)
-                .fetch_one(&mut **tx)
-                .await?;
-            let charged=sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,created_at,base_cost_usd,multiplier,model_id) values($1,$2,'usage',-$3::text::numeric,$4,$5::text::numeric,$6::text::numeric,$7) on conflict(id) do nothing")
-                .bind(format!("usage:{}",charge.request_id.as_str())).bind(&owner).bind(&billed).bind(DateTime::<Utc>::from(charge.completed_at)).bind(charge.amount_usd.canonical()).bind(&multiplier).bind(&charge.model_id).execute(&mut **tx).await?.rows_affected();
-            if charged == 1 {
-                sqlx::query("update portal_wallets set balance_usd=balance_usd-$2::text::numeric,total_spent_usd=total_spent_usd+$2::text::numeric,updated_at=now() where user_id=$1")
-                    .bind(&owner).bind(&billed).execute(&mut **tx).await?;
-            }
-        }
         sqlx::query("update client_key_budget_windows set
                 daily_used_usd = daily_used_usd + case when $3 >= daily_start and $3 < daily_end then $2::text::numeric else 0 end,
                 weekly_used_usd = weekly_used_usd + case when $3 >= weekly_start and $3 < weekly_end then $2::text::numeric else 0 end
                 where client_api_key_id = $1")
                 .bind(key).bind(charge.amount_usd.canonical()).bind(DateTime::<Utc>::from(charge.completed_at))
                 .execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
+async fn settle_portal_wallet(
+    tx: &mut Transaction<'_, Postgres>,
+    charge: &ClientBudgetCharge,
+) -> Result<(), sqlx::Error> {
+    let owner: Option<String> = sqlx::query_scalar(
+        "select user_id from portal_user_requests where request_id=$1 and key_id=$2",
+    )
+    .bind(charge.request_id.as_str())
+    .bind(charge.key_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(owner) = owner {
+        let multiplier: String = sqlx::query_scalar("select coalesce(p.policy->'modelMultipliers'->>$2,p.policy->>'globalMultiplier','1') from portal_user_requests r join portal_pricing_revisions p on p.id=r.pricing_revision where r.request_id=$1")
+            .bind(charge.request_id.as_str()).bind(&charge.model_id).fetch_one(&mut **tx).await?;
+        let billed: String =
+            sqlx::query_scalar("select round($1::text::numeric*$2::text::numeric,8)::text")
+                .bind(charge.amount_usd.canonical())
+                .bind(&multiplier)
+                .fetch_one(&mut **tx)
+                .await?;
+        sqlx::query("select user_id from portal_wallets where user_id=$1 for update")
+            .bind(&owner)
+            .fetch_one(&mut **tx)
+            .await?;
+        let changed = sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,created_at,base_cost_usd,multiplier,model_id) values($1,$2,'usage',-$3::text::numeric,$4,$5::text::numeric,$6::text::numeric,$7) on conflict(id) do nothing")
+            .bind(format!("usage:{}",charge.request_id.as_str())).bind(&owner).bind(&billed).bind(DateTime::<Utc>::from(charge.completed_at)).bind(charge.amount_usd.canonical()).bind(&multiplier).bind(&charge.model_id).execute(&mut **tx).await?.rows_affected();
+        if changed == 1 {
+            sqlx::query("update portal_wallets set balance_usd=balance_usd-$2::text::numeric,total_spent_usd=total_spent_usd+$2::text::numeric,updated_at=now() where user_id=$1")
+                .bind(&owner).bind(&billed).execute(&mut **tx).await?;
+        }
     }
     Ok(())
 }

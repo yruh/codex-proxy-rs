@@ -12,6 +12,107 @@ use gateway_store::postgres::PgPortalStore;
 struct AllowAdmission;
 
 #[tokio::test]
+async fn portal_deletion_revokes_access_and_preserves_history() {
+    use gateway_admin::model::portal::PortalKey;
+    let Some(database) = TestDatabase::create("portal_deletion").await else {
+        return;
+    };
+    let store = PgPortalStore::new(database.pool.clone());
+    let owner = PortalUser {
+        id: "owner".into(),
+        username: "owner".into(),
+        enabled: true,
+        session_version: 1,
+    };
+    let other = PortalUser {
+        id: "other".into(),
+        username: "other".into(),
+        enabled: true,
+        session_version: 1,
+    };
+    for user in [&owner, &other] {
+        store
+            .create_user(PortalCredential {
+                user: user.clone(),
+                password_hash: "hash".into(),
+            })
+            .await
+            .unwrap();
+    }
+    let key = PortalKey {
+        id: "delete_key".into(),
+        name: "Delete me".into(),
+        key: "sk_delete_test".into(),
+        enabled: true,
+    };
+    store.create_own_key(&owner, &key).await.unwrap();
+    store
+        .credit_wallet(&owner.id, "credit", "10", "retain ledger")
+        .await
+        .unwrap();
+    assert!(store.delete_own_key(&other, &key.id).await.is_err());
+    assert_eq!(store.own_keys(&owner.id).await.unwrap().len(), 1);
+    store.delete_own_key(&owner, &key.id).await.unwrap();
+    assert!(store.own_keys(&owner.id).await.unwrap().is_empty());
+    assert_eq!(
+        store.owned_key_ids(&owner.id).await.unwrap(),
+        vec![key.id.clone()]
+    );
+    let second = PortalKey {
+        id: "second_key".into(),
+        key: "sk_second_test".into(),
+        ..key
+    };
+    store.create_own_key(&owner, &second).await.unwrap();
+    store.delete_user(&owner.id).await.unwrap();
+    assert!(store.user(&owner.id).await.unwrap().is_none());
+    assert!(
+        store
+            .user_credentials(&owner.username)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(store.users().await.unwrap().len(), 1);
+    assert!(store.update_user(&owner.id, true, None).await.is_err());
+    assert!(store.create_own_key(&owner, &second).await.is_err());
+    let count: i64 =
+        sqlx::query_scalar("select count(*) from client_api_keys where id='second_key'")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(store.wallet_events(&owner.id).await.unwrap().len(), 1);
+    // 重建同名用户不会继承已删除身份的钱包和用量。
+    let replacement = PortalUser {
+        id: "replacement".into(),
+        ..owner
+    };
+    store
+        .create_user(PortalCredential {
+            user: replacement.clone(),
+            password_hash: "hash".into(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        store
+            .owned_key_ids(&replacement.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .wallet_events(&replacement.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    database.close().await;
+}
+
+#[tokio::test]
 async fn own_key_is_bound_atomically_and_pricing_is_fixed_at_admission() {
     use gateway_admin::model::portal::{PortalKey, PortalPricing};
     use gateway_core::engine::budget::{ClientBudgetCharge, ClientBudgetPort};
@@ -93,6 +194,8 @@ async fn own_key_is_bound_atomically_and_pricing_is_fixed_at_admission() {
         })
         .await
         .unwrap();
+    // 已准入请求在用户和密钥删除后仍须按原归属完成扣费，不能漏账。
+    store.delete_user(&user.id).await.unwrap();
     let budget = PgClientBudgetStore::new(database.pool.clone());
     for (id, model) in [
         ("req_discount", "discount-model"),
@@ -118,11 +221,12 @@ async fn own_key_is_bound_atomically_and_pricing_is_fixed_at_admission() {
             .unwrap(),
         7.7
     );
-    let original: String =
-        sqlx::query_scalar("select sum(amount_usd)::text from client_key_charge_events")
-            .fetch_one(&database.pool)
-            .await
-            .unwrap();
+    let original: String = sqlx::query_scalar(
+        "select sum(base_cost_usd)::text from portal_wallet_events where kind='usage'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
     assert_eq!(original.parse::<f64>().unwrap(), 2.0);
     let rates: Vec<String> = sqlx::query_scalar(
         "select multiplier::text from portal_wallet_events where kind='usage' order by id",

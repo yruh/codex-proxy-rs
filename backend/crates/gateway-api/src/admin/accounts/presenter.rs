@@ -240,6 +240,7 @@ pub(crate) fn quota_window_view(window: ProviderQuotaWindow) -> AccountQuotaWind
         limit_reached,
         local_usage: local_usage.as_ref().map(quota_local_usage),
         reset_at_display: reset_at.map_or_else(|| "—".to_owned(), |value| china_datetime(&value)),
+        reset_at: reset_at.map(|value| china_rfc3339(&value)),
     }
 }
 

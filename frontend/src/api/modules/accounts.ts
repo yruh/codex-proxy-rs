@@ -26,6 +26,7 @@ export interface AccountQuotaWindow {
   limitReached: boolean
   localUsage?: unknown
   resetAtDisplay: string
+  resetAt?: string | null
 }
 
 export interface AccountQuota {
