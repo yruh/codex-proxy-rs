@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import type { AccountListResponse, AccountModelsResponse } from '@/api/modules/accounts'
 import { ref } from 'vue'
 import { portalRequest } from '@/api/modules/portal'
 import BaseButton from '@/components/base/BaseButton.vue'
 import FormItem from '@/components/base/BaseForm/FormItem.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal/index.vue'
+import BaseSelect from '@/components/base/BaseSelect.vue'
 
 interface Pricing { globalMultiplier: string, modelMultipliers: Record<string, string> }
 const open = ref(false)
@@ -13,17 +15,63 @@ const loaded = ref(false)
 const error = ref('')
 const saved = ref(false)
 const globalMultiplier = ref('1')
-const models = ref<{ model: string, multiplier: string }[]>([])
+const models = ref<{ model: string, multiplier: string, custom: boolean }[]>([])
+const catalog = ref<{ label: string, value: string }[]>([])
+const catalogBusy = ref(false)
+const catalogError = ref('')
+async function loadCatalog() {
+  catalogBusy.value = true
+  catalogError.value = ''
+  const found = new Map<string, string>()
+  try {
+    let page = 1
+    let totalPages = 1
+    let failures = 0
+    do {
+      const accounts = await portalRequest<AccountListResponse>(`/api/admin/accounts?page=${page}&pageSize=100`)
+      totalPages = accounts.page.totalPages
+      for (let start = 0; start < accounts.items.length; start += 5) {
+        const results = await Promise.allSettled(accounts.items.slice(start, start + 5).map(account =>
+          portalRequest<AccountModelsResponse>(`/api/admin/accounts/models?accountId=${encodeURIComponent(account.id)}`),
+        ))
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            failures++
+            continue
+          }
+          for (const model of result.value.models)
+            found.set(model.id, model.label)
+        }
+      }
+      page++
+    } while (page <= totalPages)
+    if (failures)
+      catalogError.value = '部分账号的模型加载失败，可以重试或手动输入模型 ID。'
+  }
+  catch { catalogError.value = '模型列表加载失败，可以重试或手动输入模型 ID。' }
+  finally {
+    catalog.value = [...found].sort(([a], [b]) => a.localeCompare(b)).map(([value, label]) => ({ value, label: value, description: label === value ? undefined : label }))
+    catalogBusy.value = false
+  }
+}
+function modelOptions(current: string) {
+  const options = catalog.value.map(option => ({ ...option, disabled: models.value.some(row => row.model === option.value && row.model !== current) }))
+  if (current && !options.some(option => option.value === current))
+    options.unshift({ value: current, label: current, disabled: false })
+  return options
+}
 async function load() {
   open.value = true
   busy.value = true
   loaded.value = false
   error.value = ''
   saved.value = false
+  if (!catalogBusy.value)
+    void loadCatalog()
   try {
     const data = await portalRequest<Pricing>('/api/admin/portal/pricing')
     globalMultiplier.value = data.globalMultiplier
-    models.value = Object.entries(data.modelMultipliers).map(([model, multiplier]) => ({ model, multiplier }))
+    models.value = Object.entries(data.modelMultipliers).map(([model, multiplier]) => ({ model, multiplier, custom: false }))
     loaded.value = true
   }
   catch (e) { error.value = e instanceof Error ? e.message : '加载失败' }
@@ -59,21 +107,33 @@ async function save() {
       <div class="flex items-center justify-between gap-3">
         <h3 class="font-semibold">
           单模型覆盖
-        </h3><BaseButton size="sm" :disabled="busy || !loaded || models.length >= 200" @click="models.push({ model: '', multiplier: '1' })">
+        </h3><BaseButton size="sm" :disabled="busy || !loaded || models.length >= 200" @click="models.push({ model: '', multiplier: '1', custom: false })">
           添加模型
         </BaseButton>
       </div>
       <p class="text-xs leading-relaxed text-cp-text-tertiary">
         精确匹配请求中的模型 ID。单模型倍率覆盖全局倍率，不叠乘；删除覆盖后恢复使用全局倍率。
       </p>
-      <div v-for="(row, index) in models" :key="index" class="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-3">
+      <div class="flex items-center justify-between gap-3 text-xs text-cp-text-tertiary">
+        <span>{{ catalogError || (catalogBusy ? '正在加载账号模型…' : `已汇总 ${catalog.length} 个模型，重复模型已合并。`) }}</span>
+        <BaseButton size="sm" :disabled="catalogBusy" @click="loadCatalog">
+          重新加载模型
+        </BaseButton>
+      </div>
+      <div v-for="(row, index) in models" :key="index" class="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-start gap-3">
         <FormItem label="模型 ID">
-          <BaseInput v-model="row.model" :disabled="busy" placeholder="例如 gpt-5.4" :aria-label="`模型 ID ${index + 1}`" />
+          <div class="space-y-2">
+            <BaseInput v-if="row.custom" v-model="row.model" :disabled="busy" placeholder="输入自定义模型 ID" :aria-label="`模型 ID ${index + 1}`" />
+            <BaseSelect v-else v-model="row.model" class="w-full" :options="modelOptions(row.model)" :disabled="busy || catalogBusy" placeholder="选择已有模型" empty-text="暂无模型，请手动输入或重新加载" :aria-label="`选择模型 ${index + 1}`" />
+            <BaseButton size="sm" variant="ghost" :disabled="busy" @click="row.custom = !row.custom">
+              {{ row.custom ? '从已有模型选择' : '手动输入模型 ID' }}
+            </BaseButton>
+          </div>
         </FormItem>
         <FormItem label="倍率">
           <BaseInput v-model="row.multiplier" :disabled="busy" inputmode="decimal" :aria-label="`模型倍率 ${index + 1}`" />
         </FormItem>
-        <BaseButton variant="ghost" :disabled="busy" :aria-label="`删除模型 ${index + 1}`" @click="models.splice(index, 1)">
+        <BaseButton class="mt-6" variant="ghost" :disabled="busy" :aria-label="`删除模型 ${index + 1}`" @click="models.splice(index, 1)">
           删除
         </BaseButton>
       </div>
