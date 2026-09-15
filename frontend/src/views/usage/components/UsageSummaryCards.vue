@@ -17,7 +17,7 @@ function averageLatencyDisplay(value: string) {
 const items = computed(() => [
   {
     key: 'requests',
-    label: '成功请求',
+    label: '请求总数',
     icon: Activity,
     value: props.summary.totalRequests,
     detail: '筛选范围内',
