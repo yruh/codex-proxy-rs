@@ -30,8 +30,8 @@ def request(path, body=None, cookie=None, token=None, expected=200):
     return data.get("data"), response.headers.get("Set-Cookie", "").split(";")[0]
 
 
-_, admin = request("/api/admin/auth/login", {"username": "admin@cpr.local", "password": os.environ["CI_ADMIN_PASSWORD"]})
-assert admin.startswith("cpr_admin_session=")
+_, admin = request("/api/auth/login", {"mode": "admin", "username": "admin@cpr.local", "password": os.environ["CI_ADMIN_PASSWORD"]})
+assert admin.startswith("cpr_session=")
 students = []
 for name in ["alice", "bob"]:
     password = secrets.token_urlsafe(24)
@@ -80,6 +80,12 @@ data, _ = request("/api/admin/usage/combined?" + query, cookie=admin)
 assert data["items"] == []
 request("/api/admin/portal/users/update", {"id": students[0][0], "enabled": False}, cookie=admin)
 request("/api/portal/status", cookie=students[0][1], expected=401)
+# 新 Key 会话也不能跨入定制管理员页面或普通用户会话。
+key, _ = request("/api/portal/keys", {"name": "key-login-check"}, cookie=students[1][1], expected=201)
+_, key_cookie = request("/api/auth/login", {"mode": "key", "apiKey": key["key"]})
+for path in ["/api/admin/portal/users", "/api/admin/portal/pricing", "/api/admin/usage/combined?" + query]:
+    request(path, cookie=key_cookie, expected=403)
+request("/api/portal/status", cookie=key_cookie, expected=401)
 request("/api/portal/logout", {}, cookie=students[1][1])
 request("/api/portal/status", cookie=students[1][1], expected=401)
 print("Dual-source HTTP smoke passed: user isolation, revocation, sync replay and tombstones")
