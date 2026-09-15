@@ -68,6 +68,7 @@ export interface UsageRecordMetadata {
 }
 
 export interface UsageListRecord {
+  portalUsername: string | null
   id: string
   provider: string | null
   authenticationKind: string | null
@@ -252,6 +253,7 @@ export interface OpsErrorMetadata {
 }
 
 export interface OpsError {
+  portalUsername: string | null
   id: string
   requestId: string | null
   clientApiKeyId: string | null
@@ -451,6 +453,7 @@ export interface UsageDiagnosticsResponse {
 interface UsageRangeQuery {
   startTime: string
   endTime: string
+  userId?: string
   provider?: string
   model?: string
   statusCode?: number

@@ -20,6 +20,7 @@ const props = defineProps<{
   timeRangeParams: UsageTimeRangeParams
   latestTimeRangeParams: () => UsageTimeRangeParams
   provider: string
+  userId: string
   active: boolean
 }>()
 
@@ -37,6 +38,7 @@ const {
   timeRangeParams: toRef(props, 'timeRangeParams'),
   latestTimeRangeParams: () => props.latestTimeRangeParams(),
   provider: toRef(props, 'provider'),
+  userId: toRef(props, 'userId'),
   active: toRef(props, 'active'),
 })
 

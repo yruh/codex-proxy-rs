@@ -10,6 +10,7 @@ pub(crate) fn store_range(
 
 pub(crate) fn store_usage_filter(filter: admin_observability::UsageFilter) -> UsageRecordFilter {
     UsageRecordFilter {
+        user_id: filter.user_id,
         client_api_key_ref: filter.client_api_key_ref,
         request_id: filter.request_id,
         provider_account_ref: filter.provider_account_ref,
@@ -46,6 +47,7 @@ pub(crate) fn store_ops_error_filter(
     filter: admin_observability::OpsErrorFilter,
 ) -> OpsErrorFilter {
     OpsErrorFilter {
+        user_id: filter.user_id,
         client_api_key_ref: filter.client_api_key_ref,
         request_id: filter.request_id,
         provider_account_ref: filter.provider_account_ref,
@@ -428,6 +430,7 @@ pub(crate) fn admin_usage_list_record(
         }
     };
     Ok(admin_observability::UsageListRecord {
+        portal_username: record.portal_username,
         id: record.id,
         endpoint: record.endpoint,
         client_transport: record.client_transport,
@@ -696,6 +699,7 @@ pub(crate) fn admin_ops_error_page(
 
 pub(crate) fn admin_ops_error(error: OpsErrorRecord) -> admin_observability::OpsError {
     admin_observability::OpsError {
+        portal_username: error.portal_username,
         source: error.source,
         event_id: error.event_id,
         request_id: error.request_id,
@@ -753,6 +757,7 @@ pub(crate) fn usage_list_record_from_row(
     row: &sqlx::postgres::PgRow,
 ) -> StoreResult<UsageListRecord> {
     Ok(UsageListRecord {
+        portal_username: get(row, "portal_username")?,
         id: get(row, "id")?,
         endpoint: get(row, "endpoint")?,
         client_transport: get(row, "client_transport")?,
@@ -884,6 +889,7 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
 
 pub(crate) fn ops_error_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<OpsErrorRecord> {
     Ok(OpsErrorRecord {
+        portal_username: get(row, "portal_username")?,
         source: get(row, "source")?,
         event_id: get(row, "event_id")?,
         request_id: get(row, "request_id")?,

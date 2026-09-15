@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { PortalUser } from '@/api/modules/portal'
 import { Eye } from '@lucide/vue'
-import { computed, shallowRef, watch } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
+import { portalRequest } from '@/api/modules/portal'
 
 import BaseCard from '@/components/base/BaseCard.vue'
 import BaseIconButton from '@/components/base/BaseIconButton.vue'
@@ -32,6 +34,7 @@ const {
   currentPage,
   searchQuery,
   providerQuery,
+  userQuery,
   usagePagination,
   loading,
   analyticsLoading,
@@ -51,6 +54,23 @@ const {
 })
 
 const { showDetailModal, selectedUsageRecord, handleViewDetail } = useUsageRecordDetail()
+const users = shallowRef<PortalUser[]>([])
+const usersError = shallowRef('')
+const userOptions = computed(() => [
+  { label: '全部用户', value: '' },
+  ...users.value.map(user => ({ label: user.username, value: user.id })),
+])
+const scopeLabel = computed(() => userQuery.value
+  ? `用户：${users.value.find(user => user.id === userQuery.value)?.username || userQuery.value} · 包含该用户全部密钥`
+  : '全部用户及未分配密钥的请求')
+onMounted(async () => {
+  try {
+    users.value = (await portalRequest<{ items: PortalUser[] }>('/api/admin/portal/users')).items
+  }
+  catch {
+    usersError.value = '用户列表加载失败，请刷新页面重试'
+  }
+})
 
 watch(timeRange, () => {
   refreshTimeRangeEnd()
@@ -63,6 +83,7 @@ watch(timeRange, () => {
   <div class="w-full">
     <BasePageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
       <template #actions>
+        <BaseSelect v-model="userQuery" :options="userOptions" class="w-48" aria-label="按用户查看用量" />
         <BaseSelect v-model="timeRange" :options="usageTimeRangeOptions" class="w-34" />
         <ProviderFilterSegmented
           v-model="providerQuery"
@@ -71,6 +92,10 @@ watch(timeRange, () => {
         />
       </template>
     </BasePageHeader>
+
+    <p class="mb-5 text-cp font-emphasis text-cp-text-secondary">
+      {{ usersError || scopeLabel }}
+    </p>
 
     <UsageSummaryCards :summary="summary" />
     <UsageInsightsGrid
@@ -146,6 +171,7 @@ watch(timeRange, () => {
             :time-range-params="timeRangeParams"
             :latest-time-range-params="latestTimeRangeParams"
             :provider="providerQuery"
+            :user-id="userQuery"
             :active="recordView === 'errors'"
           />
         </div>

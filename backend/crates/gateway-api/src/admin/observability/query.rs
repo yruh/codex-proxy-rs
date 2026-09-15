@@ -27,6 +27,7 @@ impl DashboardQuery {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageQuery {
+    pub user_id: Option<String>,
     pub current_page: Option<u32>,
     pub page_size: Option<u16>,
     pub kind: Option<String>,
@@ -80,6 +81,7 @@ impl DetailQuery {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiagnosticsQuery {
+    pub user_id: Option<String>,
     pub dimension: Option<String>,
     pub start_time: Option<String>,
     pub end_time: Option<String>,
@@ -100,6 +102,7 @@ impl DiagnosticsQuery {
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpsQuery {
+    pub user_id: Option<String>,
     pub current_page: Option<u32>,
     pub page_size: Option<u16>,
     pub kind: Option<String>,
@@ -304,6 +307,7 @@ pub(crate) fn usage_filter(query: &UsageQuery) -> Result<domain::UsageFilter, Wi
         })
     });
     Ok(domain::UsageFilter {
+        user_id: non_empty(query.user_id.clone()),
         client_api_key_ref: non_empty(query.client_api_key_id.clone()),
         request_id: non_empty(query.request_id.clone()),
         provider_account_ref: non_empty(query.account_id.clone()),
@@ -345,6 +349,7 @@ pub(crate) fn ops_command(query: &OpsQuery) -> Result<domain::OpsErrorQuery, Wir
     Ok(domain::OpsErrorQuery {
         range: usage_range(query.start_time.as_deref(), query.end_time.as_deref())?,
         filter: domain::OpsErrorFilter {
+            user_id: non_empty(query.user_id.clone()),
             client_api_key_ref: non_empty(query.client_api_key_id.clone()),
             request_id: non_empty(query.request_id.clone()),
             provider_kind: non_empty(query.provider.clone()),

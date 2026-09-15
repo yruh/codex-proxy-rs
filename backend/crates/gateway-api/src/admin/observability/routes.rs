@@ -174,6 +174,7 @@ where
     let range = usage_range(query.start_time.as_deref(), query.end_time.as_deref())
         .map_err(map_wire_error)?;
     let filter = domain::UsageFilter {
+        user_id: non_empty(query.user_id),
         provider_kind: non_empty(query.provider),
         model: non_empty(query.model),
         status_code: parse_status(query.status_code).map_err(map_wire_error)?,

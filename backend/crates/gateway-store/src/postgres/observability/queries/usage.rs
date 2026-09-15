@@ -11,6 +11,7 @@ pub(crate) fn push_usage_filter(
     filter: &UsageRecordFilter,
     alias: &str,
 ) {
+    push_user_filter(query, &filter.user_id, alias);
     if let Some(value) = &filter.client_api_key_ref {
         query.push(format!(" and {alias}.client_api_key_ref = "));
         query.push_bind(value.clone());
@@ -100,6 +101,19 @@ pub(crate) fn push_usage_filter(
     }
 }
 
+pub(crate) fn push_user_filter(
+    query: &mut QueryBuilder<Postgres>,
+    user_id: &Option<String>,
+    alias: &str,
+) {
+    if let Some(value) = user_id {
+        // 保留密钥删除后的归属，用户统计覆盖其全部历史请求。
+        query.push(format!(" and exists (select 1 from portal_key_owners owner where owner.client_api_key_id = {alias}.client_api_key_ref and owner.user_id = "));
+        query.push_bind(value.clone());
+        query.push(")");
+    }
+}
+
 pub(crate) fn push_client_key_name_search(
     query: &mut QueryBuilder<Postgres>,
     key_ref: &str,
@@ -125,6 +139,8 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
     "select mr.id, mr.endpoint, mr.client_transport, mr.requested_model_id,
+            (select u.username from portal_key_owners owner join portal_users u on u.id = owner.user_id
+             where owner.client_api_key_id = mr.client_api_key_ref) as portal_username,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,

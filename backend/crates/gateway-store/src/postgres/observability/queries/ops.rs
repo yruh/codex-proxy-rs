@@ -3,6 +3,8 @@
 use super::super::*;
 
 const REQUEST_ERROR_SELECT: &str = "select 'model_request'::text as source,
+       (select u.username from portal_key_owners owner join portal_users u on u.id = owner.user_id
+        where owner.client_api_key_id = mr.client_api_key_ref) as portal_username,
        mr.id as event_id, mr.id as request_id,
        nullif(mr.attempt_count, 0) as attempt_index,
        mr.client_api_key_ref, 'model_request'::text as component, mr.operation,
@@ -35,6 +37,8 @@ from model_requests mr
 where true";
 
 const OPS_EVENT_SELECT: &str = "select 'ops_event'::text as source,
+       (select u.username from portal_key_owners owner join portal_users u on u.id = owner.user_id
+        where owner.client_api_key_id = mr.client_api_key_ref) as portal_username,
        oe.id as event_id, oe.model_request_id as request_id, oe.attempt_index,
        mr.client_api_key_ref, oe.component, oe.operation,
        mr.protocol, mr.client_transport, mr.requested_model_id, mr.service_tier,
@@ -131,6 +135,7 @@ fn push_request_error_predicates(
     // 列表和总数共用此条件，避免流式响应中的错误因 outcome 被漏掉。
     statement.push(" and mr.error_kind is not null and mr.error_kind <> 'cancelled'");
     push_range(statement, "mr.completed_at", range);
+    super::usage::push_user_filter(statement, &filter.user_id, "mr");
     for (column, value) in [
         ("mr.client_api_key_ref", &filter.client_api_key_ref),
         ("mr.id", &filter.request_id),
@@ -173,6 +178,7 @@ fn push_ops_event_predicates(
     filter: &OpsErrorFilter,
 ) {
     push_range(statement, "oe.created_at", range);
+    super::usage::push_user_filter(statement, &filter.user_id, "mr");
     for (column, value) in [
         ("mr.client_api_key_ref", &filter.client_api_key_ref),
         ("oe.model_request_id", &filter.request_id),

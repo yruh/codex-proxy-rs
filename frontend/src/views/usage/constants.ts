@@ -6,9 +6,10 @@ import { formatProvider } from './utils/format'
 type OpsErrorRow = OpsError
 
 export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
+  { key: 'portalUsername', label: '用户', kind: 'identity', size: 'lg', emptyText: '未分配用户' },
   {
     key: 'accountEmail',
-    label: '账号',
+    label: '上游账号',
     kind: 'identity',
     size: '3xl',
   },
@@ -34,7 +35,8 @@ export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
 ])
 
 export const opsErrorColumns = defineTableColumns<OpsErrorRow>([
-  { key: 'accountId', label: '账号', kind: 'identity', size: '3xl', emptyText: '未知账号' },
+  { key: 'portalUsername', label: '用户', kind: 'identity', size: 'lg', emptyText: '未分配用户' },
+  { key: 'accountId', label: '上游账号', kind: 'identity', size: '3xl', emptyText: '未知账号' },
   { key: 'provider', label: '平台/类型', kind: 'custom', size: 'sm' },
   { key: 'message', label: '错误', kind: 'custom', size: '4xl' },
   { key: 'upstreamSendState', label: '发送状态', kind: 'custom', size: 'xl' },

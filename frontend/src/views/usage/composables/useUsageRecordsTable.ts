@@ -37,6 +37,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const searchQuery = shallowRef('')
   const search = computed(() => searchQuery.value.trim() || undefined)
   const providerQuery = shallowRef('')
+  const userQuery = shallowRef('')
   let tableParams = snapshot()
   const refreshingList = shallowRef(false)
   const diagnosticDimension = shallowRef('model')
@@ -50,6 +51,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const scopedParams = () => ({
     ...options.timeRangeParams.value,
     ...(providerQuery.value ? { provider: providerQuery.value } : {}),
+    ...(userQuery.value ? { userId: userQuery.value } : {}),
   })
   const usagePagination = computed(() => ({
     currentPage: currentPage.value,
@@ -61,6 +63,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     return {
       ...options.latestTimeRangeParams(),
       provider: providerQuery.value || undefined,
+      userId: userQuery.value || undefined,
       search: search.value,
     }
   }
@@ -215,7 +218,10 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     void loadDiagnostics()
   })
 
-  watch(providerQuery, () => {
+  watch([providerQuery, userQuery], () => {
+    records.value = []
+    summary.value = emptySummary()
+    insights.value = emptyInsights()
     void loadUsageRecords({ background: true })
   })
 
@@ -253,6 +259,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     pageSize,
     searchQuery,
     providerQuery,
+    userQuery,
     usagePagination,
     loading,
     analyticsLoading,

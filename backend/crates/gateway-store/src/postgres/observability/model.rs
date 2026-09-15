@@ -59,6 +59,7 @@ pub(crate) fn observability_page_offset(
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsageRecordFilter {
+    pub user_id: Option<String>,
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
@@ -77,6 +78,7 @@ pub struct UsageRecordFilter {
 impl UsageRecordFilter {
     pub fn validate(&self) -> StoreResult<()> {
         for (value, field) in [
+            (self.user_id.as_deref(), "user filter"),
             (self.client_api_key_ref.as_deref(), "client API key filter"),
             (self.request_id.as_deref(), "request ID filter"),
             (
@@ -122,6 +124,7 @@ pub struct UsageRecordQuery {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpsErrorFilter {
+    pub user_id: Option<String>,
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
@@ -139,6 +142,7 @@ pub struct OpsErrorFilter {
 impl OpsErrorFilter {
     pub fn validate(&self) -> StoreResult<()> {
         for (value, field) in [
+            (self.user_id.as_deref(), "user filter"),
             (self.client_api_key_ref.as_deref(), "client API key filter"),
             (self.request_id.as_deref(), "request ID filter"),
             (
@@ -479,6 +483,7 @@ pub struct DashboardObservation {
 /// 使用记录列表所需的窄投影；完整执行、路由和客户端详情按 ID 单独读取。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageListRecord {
+    pub portal_username: Option<String>,
     pub id: String,
     pub endpoint: String,
     pub client_transport: String,
@@ -688,6 +693,7 @@ pub struct DiagnosticObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpsErrorRecord {
+    pub portal_username: Option<String>,
     pub source: String,
     pub event_id: String,
     pub request_id: Option<String>,

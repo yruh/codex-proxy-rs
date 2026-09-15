@@ -103,6 +103,7 @@ impl OtherRequestOutcome {
 /// 用量记录过滤条件。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsageFilter {
+    pub user_id: Option<String>,
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
@@ -130,6 +131,7 @@ pub struct UsageQuery {
 /// 运维错误过滤条件。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpsErrorFilter {
+    pub user_id: Option<String>,
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_kind: Option<String>,
@@ -533,6 +535,7 @@ pub struct DashboardObservation {
 /// 使用记录表格的窄读模型。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageListRecord {
+    pub portal_username: Option<String>,
     pub id: String,
     pub endpoint: String,
     pub client_transport: String,
@@ -760,6 +763,7 @@ pub struct DiagnosticObservation {
 /// 统一运维错误记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpsError {
+    pub portal_username: Option<String>,
     pub source: String,
     pub event_id: String,
     pub request_id: Option<String>,

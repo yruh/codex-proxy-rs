@@ -71,6 +71,83 @@ fn postgres_observability_adapter_implements_query_port() {
     assert_port::<PgObservabilityRepository>();
 }
 
+#[tokio::test]
+async fn observability_filters_all_user_keys_and_preserves_deleted_key_ownership() {
+    let Some(database) = TestDatabase::create("observability_user_scope").await else {
+        return;
+    };
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now).await.unwrap();
+    sqlx::raw_sql(
+        "insert into portal_users (id, username, password_hash) values
+         ('user_a', 'cyh', 'unused'), ('user_b', 'other', 'unused');
+         update model_requests set client_api_key_ref = 'key_second' where id = 'req_observe_success';
+         update model_requests set client_api_key_ref = 'key_other' where id = 'req_observe_failed';
+         insert into portal_key_owners (client_api_key_id, user_id) values
+         ('key_observe', 'user_a'), ('key_second', 'user_a'), ('key_other', 'user_b');",
+    ).execute(&database.pool).await.unwrap();
+    let repository = observability_repository(&database.pool);
+    let range = ObservabilityRange::new(now - TimeDelta::hours(1), now).unwrap();
+    for (user_id, expected_requests, expected_errors) in
+        [("user_a", 2, 0), ("user_b", 1, 2), ("unknown", 0, 0)]
+    {
+        let filter = UsageRecordFilter {
+            user_id: Some(user_id.to_owned()),
+            ..Default::default()
+        };
+        let summary = repository
+            .usage_summary(range, filter.clone())
+            .await
+            .unwrap();
+        assert_eq!(summary.requests.request_count, expected_requests);
+        let diagnostics = repository
+            .usage_diagnostics(range, filter.clone(), DiagnosticDimension::Account)
+            .await
+            .unwrap();
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|item| item.request_count)
+                .sum::<u64>(),
+            expected_requests
+        );
+        let records = repository
+            .list_usage_records(UsageRecordQuery {
+                range,
+                filter,
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(10).unwrap(),
+            })
+            .await
+            .unwrap();
+        if user_id == "user_a" {
+            assert_eq!(records.items.len(), 1);
+            assert_eq!(records.items[0].portal_username.as_deref(), Some("cyh"));
+        } else {
+            assert!(records.items.is_empty());
+        }
+        let errors = repository
+            .list_ops_errors(OpsErrorQuery {
+                range,
+                filter: OpsErrorFilter {
+                    user_id: Some(user_id.to_owned()),
+                    ..Default::default()
+                },
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(10).unwrap(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(errors.items.len(), expected_errors);
+        assert!(
+            errors
+                .items
+                .iter()
+                .all(|error| error.portal_username.as_deref() == Some("other"))
+        );
+    }
+}
+
 #[test]
 fn postgres_admin_observability_adapter_implements_terminal_port() {
     fn assert_port<T: AdminObservabilityStore>() {}
@@ -1072,6 +1149,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
             range,
             filter: admin_observability::UsageFilter {
                 client_api_key_ref: Some("key_observe".to_owned()),
+                user_id: None,
                 request_id: Some("req_observe_success".to_owned()),
                 provider_account_ref: Some("acct_observe".to_owned()),
                 operation: Some("responses".to_owned()),

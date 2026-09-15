@@ -11,6 +11,7 @@ interface UseOpsErrorsTableOptions {
   timeRangeParams: Readonly<Ref<UsageTimeRangeParams>>
   latestTimeRangeParams: () => UsageTimeRangeParams
   provider: Readonly<Ref<string>>
+  userId: Readonly<Ref<string>>
   active: Readonly<Ref<boolean>>
 }
 
@@ -26,6 +27,7 @@ export function useOpsErrorsTable(options: UseOpsErrorsTableOptions) {
     return {
       ...options.latestTimeRangeParams(),
       provider: options.provider.value || undefined,
+      userId: options.userId.value || undefined,
       search: search.value,
     }
   }
@@ -88,7 +90,7 @@ export function useOpsErrorsTable(options: UseOpsErrorsTableOptions) {
     { debounce: 250 },
   )
 
-  watch([options.timeRangeParams, options.provider, options.active], () => {
+  watch([options.timeRangeParams, options.provider, options.userId, options.active], () => {
     if (options.active.value)
       void reloadLatest()
     else
