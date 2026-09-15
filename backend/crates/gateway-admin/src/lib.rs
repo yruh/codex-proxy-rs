@@ -318,7 +318,7 @@ pub async fn initialize(
     let services = AdminServices {
         portal: store
             .portal()
-            .map(|port| Arc::new(PortalService::new(port))),
+            .map(|port| Arc::new(PortalService::new(port, snapshot.clone()))),
         local_usage: store
             .local_usage()
             .map(|port| Arc::new(LocalUsageService::new(port))),

@@ -6,6 +6,13 @@ use super::AdminError;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortalPricing {
+    pub global_multiplier: String,
+    pub model_multipliers: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WalletPolicy {
     pub daily_limit_usd: String,
     pub weekly_limit_usd: String,

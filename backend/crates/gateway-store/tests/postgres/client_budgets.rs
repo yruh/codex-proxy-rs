@@ -26,6 +26,7 @@ fn key_id(key: &str) -> ClientApiKeyId {
 
 fn charge(key: &str, request: &str, amount: &str) -> ClientBudgetCharge {
     ClientBudgetCharge {
+        model_id: "test-model".to_owned(),
         key_id: key_id(key),
         request_id: ModelRequestId::new(format!("req_{request}")).unwrap(),
         amount_usd: amount.parse().unwrap(),

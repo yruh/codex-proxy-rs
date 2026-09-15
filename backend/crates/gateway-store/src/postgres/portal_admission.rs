@@ -65,7 +65,7 @@ impl PgPortalAdmission {
             ));
         }
         let ttl = i64::try_from(request.lease_ttl.as_millis()).map_err(|_| ClientAdmissionError)?;
-        sqlx::query("insert into portal_user_requests(request_id,user_id,key_id,expires_at) values($1,$2,$3,now()+$4*interval '1 millisecond') on conflict(request_id) do nothing")
+        sqlx::query("insert into portal_user_requests(request_id,user_id,key_id,expires_at,pricing_revision) values($1,$2,$3,now()+$4*interval '1 millisecond',(select max(id) from portal_pricing_revisions)) on conflict(request_id) do nothing")
             .bind(request.model_request_id.as_str()).bind(&owner).bind(request.client_api_key_id.as_str()).bind(ttl).execute(&mut *tx).await.map_err(|_|ClientAdmissionError)?;
         tx.commit().await.map_err(|_| ClientAdmissionError)?;
         Ok(ClientAdmissionDecision::Granted)

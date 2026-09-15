@@ -29,7 +29,11 @@ where
         .route("/api/portal/status", get(status::<S>))
         .route("/api/portal/logout", post(logout::<S>))
         .route("/api/portal/password", post(change_password::<S>))
-        .route("/api/portal/keys", get(keys::<S>))
+        .route("/api/portal/keys", get(keys::<S>).post(create_own_key::<S>))
+        .route(
+            "/api/admin/portal/pricing",
+            get(pricing::<S>).post(set_pricing::<S>),
+        )
         .route("/api/portal/usage", get(usage::<S>))
         .route("/api/portal/wallet", get(own_wallet::<S>))
         .route("/api/admin/portal/wallet", get(wallet::<S>))
@@ -44,6 +48,55 @@ where
 }
 fn view(user: PortalUser) -> Value {
     json!({"id":user.id,"username":user.username,"enabled":user.enabled})
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeyName {
+    name: String,
+}
+async fn create_own_key<S: AdminSessionState + Send + Sync>(
+    State(state): State<S>,
+    headers: HeaderMap,
+    AdminJson(body): AdminJson<KeyName>,
+) -> Result<impl IntoResponse, AdminError> {
+    let key = state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .create_key(cookie(&headers), &body.name)
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok((
+        StatusCode::CREATED,
+        ok(json!({"id":key.id,"name":key.name,"key":key.key,"enabled":key.enabled})),
+    ))
+}
+async fn pricing<S: AdminSessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+) -> Result<impl IntoResponse, AdminError> {
+    let policy = state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .pricing()
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(json!(policy)))
+}
+async fn set_pricing<S: AdminSessionState + Send + Sync>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(body): AdminJson<gateway_admin::model::portal::PortalPricing>,
+) -> Result<impl IntoResponse, AdminError> {
+    state
+        .admin_services()
+        .portal()
+        .map_err(map_admin_service_error)?
+        .set_pricing(body)
+        .await
+        .map_err(map_admin_service_error)?;
+    Ok(ok(json!({})))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

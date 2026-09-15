@@ -10,6 +10,135 @@ use gateway_core::{engine::ModelRequestId, policy::ClientApiKeyId};
 use gateway_store::postgres::PgPortalStore;
 
 struct AllowAdmission;
+
+#[tokio::test]
+async fn own_key_is_bound_atomically_and_pricing_is_fixed_at_admission() {
+    use gateway_admin::model::portal::{PortalKey, PortalPricing};
+    use gateway_core::engine::budget::{ClientBudgetCharge, ClientBudgetPort};
+    use gateway_store::postgres::{PgClientBudgetStore, PgPortalAdmission};
+    use std::{sync::Arc, time::SystemTime};
+    let Some(database) = TestDatabase::create("portal_pricing").await else {
+        return;
+    };
+    let store = PgPortalStore::new(database.pool.clone());
+    let user = PortalUser {
+        id: "priced-user".into(),
+        username: "priced-user".into(),
+        enabled: true,
+        session_version: 1,
+    };
+    store
+        .create_user(PortalCredential {
+            user: user.clone(),
+            password_hash: "hash".into(),
+        })
+        .await
+        .unwrap();
+    let key = PortalKey {
+        id: "key_priced".into(),
+        name: "My computer".into(),
+        key: format!("sk_{}", "a".repeat(43)),
+        enabled: true,
+    };
+    store.create_own_key(&user, &key).await.unwrap();
+    assert_eq!(
+        store.own_keys(&user.id).await.unwrap()[0].name,
+        "My computer"
+    );
+    assert!(store.own_keys("another-user").await.unwrap().is_empty());
+    let mut stale = user.clone();
+    stale.session_version = 2;
+    let invalid = PortalKey {
+        id: "key_stale".into(),
+        name: "stale".into(),
+        key: format!("sk_{}", "b".repeat(43)),
+        enabled: true,
+    };
+    assert!(store.create_own_key(&stale, &invalid).await.is_err());
+    let leaked: i64 =
+        sqlx::query_scalar("select count(*) from client_api_keys where id='key_stale'")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(leaked, 0);
+    store
+        .credit_wallet(&user.id, "test-credit", "10", "")
+        .await
+        .unwrap();
+    store
+        .set_pricing(PortalPricing {
+            global_multiplier: "1.5".into(),
+            model_multipliers: [("discount-model".into(), "0.8".into())].into(),
+        })
+        .await
+        .unwrap();
+    let admission = PgPortalAdmission::new(database.pool.clone(), Arc::new(AllowAdmission));
+    for id in ["req_discount", "req_global"] {
+        let decision = admission
+            .admit(ClientAdmissionRequest {
+                model_request_id: ModelRequestId::new(id).unwrap(),
+                client_api_key_id: ClientApiKeyId::new(&key.id).unwrap(),
+                lease_ttl: std::time::Duration::from_secs(60),
+                limits: Default::default(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(decision, ClientAdmissionDecision::Granted);
+    }
+    // 改价发生在结算前；已有请求仍用原倍率，模型覆盖不与全局叠乘。
+    store
+        .set_pricing(PortalPricing {
+            global_multiplier: "9".into(),
+            model_multipliers: Default::default(),
+        })
+        .await
+        .unwrap();
+    let budget = PgClientBudgetStore::new(database.pool.clone());
+    for (id, model) in [
+        ("req_discount", "discount-model"),
+        ("req_global", "other-model"),
+    ] {
+        let charge = ClientBudgetCharge {
+            key_id: ClientApiKeyId::new(&key.id).unwrap(),
+            request_id: ModelRequestId::new(id).unwrap(),
+            model_id: model.into(),
+            amount_usd: "1".parse().unwrap(),
+            completed_at: SystemTime::now(),
+        };
+        budget.settle(charge.clone()).await.unwrap();
+        budget.settle(charge).await.unwrap();
+    }
+    assert_eq!(
+        store
+            .wallet(&user.id)
+            .await
+            .unwrap()
+            .balance_usd
+            .parse::<f64>()
+            .unwrap(),
+        7.7
+    );
+    let original: String =
+        sqlx::query_scalar("select sum(amount_usd)::text from client_key_charge_events")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(original.parse::<f64>().unwrap(), 2.0);
+    let rates: Vec<String> = sqlx::query_scalar(
+        "select multiplier::text from portal_wallet_events where kind='usage' order by id",
+    )
+    .fetch_all(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rates
+            .iter()
+            .map(|v| v.parse::<f64>().unwrap())
+            .collect::<Vec<_>>(),
+        vec![0.8, 1.5]
+    );
+    database.close().await;
+}
 impl ClientAdmissionPort for AllowAdmission {
     fn admit(
         &self,
@@ -122,6 +251,7 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
     );
     let budget = PgClientBudgetStore::new(database.pool.clone());
     let charge = ClientBudgetCharge {
+        model_id: "test-model".to_owned(),
         key_id: two.client_api_key_id.clone(),
         request_id: two.model_request_id.clone(),
         amount_usd: "1".parse().unwrap(),

@@ -32,6 +32,8 @@ pub struct ClientBudgetStatus {
 
 #[derive(Debug, Clone)]
 pub struct ClientBudgetCharge {
+    /// 客户端使用的模型 ID，用于用户计费倍率；不改变上游成本。
+    pub model_id: String,
     pub key_id: ClientApiKeyId,
     pub request_id: ModelRequestId,
     /// 已取得的 USD 费用，包含重试；缺少费用的尝试按零累计。

@@ -10,6 +10,17 @@ use crate::model::{
 
 #[async_trait]
 pub trait PortalStore: Send + Sync {
+    async fn pricing(&self) -> AdminStoreResult<crate::model::portal::PortalPricing>;
+    async fn set_pricing(
+        &self,
+        policy: crate::model::portal::PortalPricing,
+    ) -> AdminStoreResult<()>;
+    /// 密钥与用户归属同一事务提交，发布前必须完成绑定。
+    async fn create_own_key(
+        &self,
+        user: &PortalUser,
+        key: &PortalKey,
+    ) -> AdminStoreResult<crate::model::Revision>;
     async fn wallet(&self, user_id: &str) -> AdminStoreResult<crate::model::portal::PortalWallet>;
     async fn wallet_events(
         &self,

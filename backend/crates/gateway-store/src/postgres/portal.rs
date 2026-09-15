@@ -41,6 +41,94 @@ fn user(row: &PgRow) -> Result<PortalUser, sqlx::Error> {
 
 #[async_trait]
 impl PortalStore for PgPortalStore {
+    async fn pricing(&self) -> AdminStoreResult<gateway_admin::model::portal::PortalPricing> {
+        let value: serde_json::Value = sqlx::query_scalar(
+            "select policy from portal_pricing_revisions order by id desc limit 1",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(failure)?;
+        serde_json::from_value(value).map_err(|_| {
+            AdminStoreError::new(AdminStoreErrorKind::Invalid, "pricing", "计费规则无效")
+        })
+    }
+    async fn set_pricing(
+        &self,
+        policy: gateway_admin::model::portal::PortalPricing,
+    ) -> AdminStoreResult<()> {
+        sqlx::query("insert into portal_pricing_revisions(policy) values($1)")
+            .bind(serde_json::to_value(policy).map_err(|_| {
+                AdminStoreError::new(AdminStoreErrorKind::Invalid, "pricing", "计费规则无效")
+            })?)
+            .execute(&self.pool)
+            .await
+            .map_err(failure)?;
+        Ok(())
+    }
+    async fn create_own_key(
+        &self,
+        user: &PortalUser,
+        key: &gateway_admin::model::portal::PortalKey,
+    ) -> AdminStoreResult<gateway_admin::model::Revision> {
+        let mut tx = self.pool.begin().await.map_err(failure)?;
+        // 与控制面写入保持锁序，密钥和归属原子发布，不能短暂成为无主的免费密钥。
+        let revision = super::bump_config_revision_in_transaction(&mut tx)
+            .await
+            .map_err(|_| {
+                AdminStoreError::new(AdminStoreErrorKind::Unavailable, "key", "密钥创建失败")
+            })?;
+        let valid: Option<bool> = sqlx::query_scalar(
+            "select enabled and session_version=$2 from portal_users where id=$1 for update",
+        )
+        .bind(&user.id)
+        .bind(user.session_version)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(failure)?;
+        if valid != Some(true) {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Invalid,
+                "key",
+                "用户登录已失效",
+            ));
+        }
+        let count: i64 =
+            sqlx::query_scalar("select count(*) from portal_key_owners where user_id=$1")
+                .bind(&user.id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(failure)?;
+        if count >= 20 {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Invalid,
+                "key",
+                "每个用户最多保留 20 个密钥，请联系管理员清理",
+            ));
+        }
+        let command = super::NewClientApiKey {
+            id: key.id.clone(),
+            name: key.id.clone(),
+            label: Some(key.name.clone()),
+            group_ids: vec![],
+            key: key.key.clone(),
+            max_concurrency: 0,
+            requests_per_minute: 0,
+            budget: Default::default(),
+        };
+        super::insert_client_api_key_in_transaction(&mut tx, &command)
+            .await
+            .map_err(|_| {
+                AdminStoreError::new(AdminStoreErrorKind::Invalid, "key", "密钥创建失败")
+            })?;
+        sqlx::query("insert into portal_key_owners(client_api_key_id,user_id) values($1,$2)")
+            .bind(&key.id)
+            .bind(&user.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(failure)?;
+        tx.commit().await.map_err(failure)?;
+        crate::value::admin_revision(revision)
+    }
     async fn wallet(
         &self,
         user_id: &str,
@@ -137,7 +225,7 @@ impl PortalStore for PgPortalStore {
         &self,
         user_id: &str,
     ) -> AdminStoreResult<Vec<gateway_admin::model::portal::PortalKey>> {
-        let rows=sqlx::query("select k.id,k.name,k.key,k.enabled from client_api_keys k join portal_key_owners o on o.client_api_key_id=k.id join portal_users u on u.id=o.user_id where u.id=$1 and u.enabled order by k.created_at")
+        let rows=sqlx::query("select k.id,coalesce(k.label,k.name) as name,k.key,k.enabled from client_api_keys k join portal_key_owners o on o.client_api_key_id=k.id join portal_users u on u.id=o.user_id where u.id=$1 and u.enabled order by k.created_at")
             .bind(user_id).fetch_all(&self.pool).await.map_err(failure)?;
         rows.iter()
             .map(|r| {
@@ -159,7 +247,7 @@ impl PortalStore for PgPortalStore {
     ) -> AdminStoreResult<Vec<gateway_admin::model::portal::PortalUsageRow>> {
         let predicate = super::completed_usage_fact_predicate("r");
         let query = format!(
-            "select r.id,o.client_api_key_id,r.upstream_model_id,r.started_at,r.input_tokens,r.output_tokens,r.cached_tokens,r.cost_amount::text as cost from model_requests r join portal_key_owners o on o.client_api_key_id=r.client_api_key_ref join portal_users u on u.id=o.user_id where u.id=$1 and u.enabled and r.started_at >= $2 and r.started_at < $3 and {predicate} order by r.started_at desc,r.id desc limit 100 offset $4"
+            "select r.id,o.client_api_key_id,r.upstream_model_id,r.started_at,r.input_tokens,r.output_tokens,r.cached_tokens,(-e.amount_usd)::text as cost from model_requests r left join portal_wallet_events e on e.id='usage:'||r.id and e.kind='usage' join portal_key_owners o on o.client_api_key_id=r.client_api_key_ref join portal_users u on u.id=o.user_id where u.id=$1 and u.enabled and r.started_at >= $2 and r.started_at < $3 and {predicate} order by r.started_at desc,r.id desc limit 100 offset $4"
         );
         let rows = sqlx::query(sqlx::AssertSqlSafe(query))
             .bind(user_id)

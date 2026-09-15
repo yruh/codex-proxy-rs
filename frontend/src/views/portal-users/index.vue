@@ -13,6 +13,7 @@ import BaseModal from '@/components/base/BaseModal/index.vue'
 import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
+import PricingSettings from './PricingSettings.vue'
 
 const availableKeys = ref<{ id: string, name: string }[]>([])
 const users = ref<PortalUser[]>([])
@@ -146,6 +147,7 @@ onMounted(() => action(load))
   <div class="flex w-full min-w-0 flex-col gap-5">
     <BasePageHeader title="用户管理" description="管理独立用户、共享余额和访问限制">
       <template #actions>
+        <PricingSettings />
         <RouterLink to="/portal" class="text-cp-link text-sm font-semibold">
           用户入口 ↗
         </RouterLink>

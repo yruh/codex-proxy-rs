@@ -22,11 +22,73 @@ use uuid::Uuid;
 /// 仅供普通用户门户使用，不签发管理员会话。
 pub struct PortalService {
     store: Arc<dyn PortalStore>,
+    snapshot: Arc<dyn gateway_core::runtime::SnapshotControl>,
     attempts: Mutex<HashMap<String, (Instant, u32)>>,
     password_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl PortalService {
+    pub async fn pricing(&self) -> Result<crate::model::portal::PortalPricing, AdminError> {
+        self.store.pricing().await.map_err(store_error)
+    }
+    pub async fn set_pricing(
+        &self,
+        mut policy: crate::model::portal::PortalPricing,
+    ) -> Result<(), AdminError> {
+        fn multiplier(value: &str) -> Result<String, AdminError> {
+            let n = wallet_amount(value)?;
+            let parsed: f64 = n.parse().map_err(|_| AdminError::invalid("倍率无效"))?;
+            if !(0.000001..=1000.0).contains(&parsed)
+                || n.split('.').nth(1).is_some_and(|v| v.len() > 6)
+            {
+                return Err(AdminError::invalid(
+                    "倍率须为 0.000001 至 1000，最多六位小数",
+                ));
+            }
+            Ok(n)
+        }
+        policy.global_multiplier = multiplier(&policy.global_multiplier)?;
+        if policy.model_multipliers.len() > 200 {
+            return Err(AdminError::invalid("最多设置 200 个模型倍率"));
+        }
+        for (model, value) in &mut policy.model_multipliers {
+            if model.trim() != model
+                || model.is_empty()
+                || model.len() > 200
+                || model.chars().any(char::is_control)
+            {
+                return Err(AdminError::invalid("模型 ID 无效"));
+            }
+            *value = multiplier(value)?;
+        }
+        self.store.set_pricing(policy).await.map_err(store_error)
+    }
+    pub async fn create_key(
+        &self,
+        token: &str,
+        name: &str,
+    ) -> Result<crate::model::portal::PortalKey, AdminError> {
+        let user = self.current_user(token).await?;
+        let name = name.trim();
+        if name.is_empty() || name.len() > 100 || name.chars().any(char::is_control) {
+            return Err(AdminError::invalid("密钥名称须为 1 至 100 字节"));
+        }
+        let mut bytes = [0_u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        let key = crate::model::portal::PortalKey {
+            id: format!("key_{}", Uuid::now_v7().simple()),
+            name: name.to_owned(),
+            key: format!("sk_{}", URL_SAFE_NO_PAD.encode(bytes)),
+            enabled: true,
+        };
+        let revision = self
+            .store
+            .create_own_key(&user, &key)
+            .await
+            .map_err(store_error)?;
+        super::publish_committed(self.snapshot.as_ref(), revision).await?;
+        Ok(key)
+    }
     pub async fn wallet(&self, id: &str) -> Result<crate::model::portal::PortalWallet, AdminError> {
         self.store.wallet(id).await.map_err(store_error)
     }
@@ -119,9 +181,13 @@ impl PortalService {
             .map_err(store_error)
     }
     #[must_use]
-    pub fn new(store: Arc<dyn PortalStore>) -> Self {
+    pub fn new(
+        store: Arc<dyn PortalStore>,
+        snapshot: Arc<dyn gateway_core::runtime::SnapshotControl>,
+    ) -> Self {
         Self {
             store,
+            snapshot,
             attempts: Mutex::new(HashMap::new()),
             password_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         }

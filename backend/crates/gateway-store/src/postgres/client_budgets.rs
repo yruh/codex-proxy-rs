@@ -167,15 +167,24 @@ async fn settle_in_transaction(
                 .fetch_optional(&mut **tx)
                 .await?;
         if let Some(owner) = owner {
+            // 使用准入时固定的规则版本，模型覆盖全局倍率，不叠乘；重试始终使用同一版本。
+            let multiplier:String=sqlx::query_scalar("select coalesce(p.policy->'modelMultipliers'->>$2,p.policy->>'globalMultiplier','1') from portal_user_requests r join portal_pricing_revisions p on p.id=r.pricing_revision where r.request_id=$1")
+                .bind(charge.request_id.as_str()).bind(&charge.model_id).fetch_one(&mut **tx).await?;
+            let billed: String =
+                sqlx::query_scalar("select round($1::text::numeric*$2::text::numeric,8)::text")
+                    .bind(charge.amount_usd.canonical())
+                    .bind(&multiplier)
+                    .fetch_one(&mut **tx)
+                    .await?;
             sqlx::query("select user_id from portal_wallets where user_id=$1 for update")
                 .bind(&owner)
                 .fetch_one(&mut **tx)
                 .await?;
-            let charged=sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,created_at) values($1,$2,'usage',-$3::text::numeric,$4) on conflict(id) do nothing")
-                .bind(format!("usage:{}",charge.request_id.as_str())).bind(&owner).bind(charge.amount_usd.canonical()).bind(DateTime::<Utc>::from(charge.completed_at)).execute(&mut **tx).await?.rows_affected();
+            let charged=sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,created_at,base_cost_usd,multiplier,model_id) values($1,$2,'usage',-$3::text::numeric,$4,$5::text::numeric,$6::text::numeric,$7) on conflict(id) do nothing")
+                .bind(format!("usage:{}",charge.request_id.as_str())).bind(&owner).bind(&billed).bind(DateTime::<Utc>::from(charge.completed_at)).bind(charge.amount_usd.canonical()).bind(&multiplier).bind(&charge.model_id).execute(&mut **tx).await?.rows_affected();
             if charged == 1 {
                 sqlx::query("update portal_wallets set balance_usd=balance_usd-$2::text::numeric,total_spent_usd=total_spent_usd+$2::text::numeric,updated_at=now() where user_id=$1")
-                    .bind(&owner).bind(charge.amount_usd.canonical()).execute(&mut **tx).await?;
+                    .bind(&owner).bind(&billed).execute(&mut **tx).await?;
             }
         }
         sqlx::query("update client_key_budget_windows set

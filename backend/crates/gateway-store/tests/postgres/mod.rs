@@ -241,6 +241,7 @@ async fn connect_and_migrate_should_apply_all_migrations_once_and_reopen_cleanly
             "ops_events",
             "outbound_proxies",
             "portal_key_owners",
+            "portal_pricing_revisions",
             "portal_sessions",
             "portal_user_requests",
             "portal_users",

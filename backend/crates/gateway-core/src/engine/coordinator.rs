@@ -177,6 +177,11 @@ where
                     .unwrap_or(Duration::ZERO),
             )
             .fuse(),
+            billing_model_id: request
+                .requested_model
+                .as_ref()
+                .map(|model| model.as_str().to_owned())
+                .unwrap_or_default(),
             pending_request: Some(request),
             request_persisted: false,
             operation,
@@ -278,6 +283,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     /// 会话级 deadline 计时器；deadline 固定，帧循环内复用而非逐事件新建。
     deadline_timer: Fuse<Delay>,
     pending_request: Option<NewModelRequest>,
+    billing_model_id: String,
     request_persisted: bool,
     operation: Operation,
     plan: RoutingPlan,
@@ -512,6 +518,7 @@ where
             .checked_add(self.budget_attempt_usd())
             .unwrap_or(Decimal::MAX);
         super::budget::ClientBudgetCharge {
+            model_id: self.billing_model_id.clone(),
             key_id: self.client_api_key_ref.clone(),
             request_id: self.request_id.clone(),
             amount_usd,

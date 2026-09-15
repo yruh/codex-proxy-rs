@@ -589,6 +589,7 @@ impl DefaultExecutionService {
                     settle_budget(
                         budget.as_ref(),
                         ClientBudgetCharge {
+                            model_id: String::new(),
                             key_id: client.policy.key_id().clone(),
                             request_id: request_id.clone(),
                             amount_usd: crate::metering::Decimal::ZERO,

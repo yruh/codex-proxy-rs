@@ -15,6 +15,8 @@ import BaseTable from '@/components/base/BaseTable/index.vue'
 
 const showPassword = ref(false)
 const showLedger = ref(false)
+const showCreateKey = ref(false)
+const keyName = ref('')
 const columns: BaseTableColumn<PortalUsage>[] = [
   { key: 'occurredAt', label: '时间', kind: 'datetime', format: v => new Date(String(v)).toLocaleString() },
   { key: 'model', label: '模型', kind: 'identity' },
@@ -45,6 +47,15 @@ const oldPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 const notice = ref('')
+async function createKey() {
+  await action(async () => {
+    const created = await portalRequest<PortalKey>('/api/portal/keys', { name: keyName.value })
+    keys.value.push(created)
+    keyName.value = ''
+    showCreateKey.value = false
+    notice.value = '密钥已创建，与你的其他密钥共用余额和用户并发上限。'
+  })
+}
 async function changePassword() {
   await action(async () => {
     if (newPassword.value !== confirmPassword.value)
@@ -192,20 +203,25 @@ onMounted(async () => {
           </BaseCard>
           <BaseCard>
             <p class="text-sm text-cp-text-secondary">
-              共享并发
+              用户总并发
             </p><p class="mt-3 text-3xl font-bold tabular-nums">
               {{ walletData.wallet.activeRequests }} <span class="text-base font-normal text-cp-text-tertiary">/ {{ walletData.wallet.maxConcurrency || '不限' }}</span>
             </p><p class="mt-3 text-xs text-cp-text-tertiary">
-              全部密钥共用 · 累计消费 {{ money(walletData.wallet.totalSpentUsd) }} USD
+              所有密钥合计；仍受密钥和上游账号并发限制
             </p>
           </BaseCard>
         </div>
         <p class="text-xs leading-relaxed text-cp-text-tertiary">
           余额耗尽自动停止新请求。日／周按北京时间重置，已开始的请求按实际费用结算。
         </p>
-        <BaseCard title="我的密钥" description="仅显示管理员分配给你的密钥">
+        <BaseCard title="我的密钥" description="自行创建或由管理员分配，全部密钥共用你的余额与限制">
+          <template #actions>
+            <BaseButton variant="primary" :disabled="busy" @click="showCreateKey = true; error = ''; keyName = ''">
+              创建密钥
+            </BaseButton>
+          </template>
           <p v-if="!keys.length" class="py-8 text-center text-sm text-cp-text-tertiary">
-            尚未分配密钥，请联系管理员。
+            还没有密钥，点击“创建密钥”开始使用。
           </p>
           <div v-for="key in keys" :key="key.id" class="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-cp bg-cp-fill-quaternary p-4">
             <div class="min-w-0">
@@ -217,7 +233,7 @@ onMounted(async () => {
             </BaseButton>
           </div>
         </BaseCard>
-        <BaseCard title="我的调用记录" description="所属密钥的代理调用，缓存已包含在输入中">
+        <BaseCard title="我的调用记录" description="费用为实际钱包扣费，已包含管理员设置的倍率；缓存已包含在输入中">
           <template #actions>
             <BaseSelect :model-value="String(days)" :disabled="busy" :options="[{ label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }]" aria-label="时间范围" @update:model-value="days = Number($event); page = 1; action(load)" />
           </template>
@@ -253,6 +269,23 @@ onMounted(async () => {
             取消
           </BaseButton><BaseButton type="submit" form="change-password" variant="primary" :loading="busy">
             修改密码
+          </BaseButton>
+        </template>
+      </BaseModal>
+      <BaseModal v-model="showCreateKey" title="创建密钥" description="密钥仅归你所有，不会增加余额或并发上限" :dismissible="!busy">
+        <form id="create-own-key" @submit.prevent="createKey">
+          <FormItem label="密钥名称" required>
+            <BaseInput v-model="keyName" placeholder="例如：我的电脑" maxlength="100" />
+          </FormItem>
+          <p v-if="error" role="alert" class="mt-3 text-sm text-cp-error-text">
+            {{ error }}
+          </p>
+        </form>
+        <template #footer>
+          <BaseButton :disabled="busy" @click="showCreateKey = false">
+            取消
+          </BaseButton><BaseButton type="submit" form="create-own-key" variant="primary" :loading="busy">
+            生成密钥
           </BaseButton>
         </template>
       </BaseModal>
