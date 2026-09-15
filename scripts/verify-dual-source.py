@@ -47,7 +47,7 @@ for name in ["alice", "bob"]:
 # Only synthetic rows in this explicitly isolated CI project; no upstream calls.
 sql = """
 insert into provider_accounts(id,provider_kind,name,upstream_user_id,authentication_kind,provider_credentials_json,has_refresh_token,access_token_expires_at,credential_state,credential_observed_at,created_at,updated_at,enabled)
-values('ci-account','openai','test','test','oauth','{}'::jsonb,false,now()+interval '1 day','ready',now(),now(),now(),false);
+values('acct_ci-account','openai','test','test','oauth','{}'::jsonb,false,now()+interval '1 day','ready',now(),now(),now(),false);
 insert into client_api_keys(id,name,key,created_at,updated_at)
 values('ci-alice','alice','sk_ci_alice',now(),now()),('ci-bob','bob','sk_ci_bob',now(),now());
 """
@@ -57,7 +57,7 @@ for key, (user_id, cookie) in zip(["ci-alice", "ci-bob"], students):
     data, _ = request("/api/portal/keys", cookie=cookie)
     assert [item["id"] for item in data["items"]] == [key]
 
-device, _ = request("/api/admin/sync/devices", {"name": "CI device", "accountId": "ci-account"}, cookie=admin)
+device, _ = request("/api/admin/sync/devices", {"name": "CI device", "accountId": "acct_ci-account"}, cookie=admin)
 token = device["token"]
 now = datetime.datetime.now(datetime.timezone.utc)
 record = {"recordId": "ci-record", "revision": 1, "occurredAt": now.isoformat(), "inputTokens": 100, "outputTokens": 10, "cachedTokens": 80, "estimatedUsd": "0.123456789012"}
