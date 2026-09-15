@@ -849,6 +849,10 @@ errorCode, errorMessage, startedAt, completedAt, expiresAt, createdAt, updatedAt
 request/response/upstream ID、outcome 与搜索文本。诊断 `dimension` 可取 `model`、`account`、
 `apiKey`、`provider`、`transport`、`failureClass`、`status`。
 
+用量列表、汇总、两类洞察和错误列表均支持 `userId`，按普通用户 ID 筛选其全部密钥的请求；
+省略时包含所有用户及未分配用户的密钥。密钥删除后保留的归属仍参与筛选。
+用量列表与错误列表的 `portalUsername` 返回所属用户名，未分配用户时为 `null`；上游账号字段保持原义。
+
 请求记录列表的 `search` 使用字面量前缀匹配，支持请求 ID、Client Key ID / 名称、
 账号 ID、账号邮箱与名称、请求 / 上游模型 ID、上游请求 ID。密钥名称不区分大小写，其他字段区分大小写。
 密钥名称按当前密钥记录检索，改名后使用新名称，删除后仍可按 Client Key ID 查询历史记录。
