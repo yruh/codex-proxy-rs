@@ -112,10 +112,16 @@ export interface AccountUsage {
   models: AccountModelUsage[]
 }
 
+export interface AccountModelAccess {
+  mode: 'all' | 'allowlist' | 'denylist'
+  models: string[]
+}
+
 export interface Account {
   outboundProxyEndpoint: string | null
   id: string
   name: string
+  notes: string | null
   provider: string
   resourceRef: string
   email: string | null
@@ -132,6 +138,7 @@ export interface Account {
   enabled: boolean
   concurrencyLimit: number | null
   weight: number
+  modelAccess: AccountModelAccess
   accessTokenExpiresAt: string | null
   accessTokenExpiresAtDisplay: string | null
   refreshTokenExpiresAt: string | null
@@ -345,9 +352,11 @@ interface AccountUpdateParam {
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountId: string
+  notes?: string
   enabled: boolean
   concurrencyLimit: number | null
   weight: number
+  modelAccess?: AccountModelAccess
   groupIds: string[]
 }
 
@@ -355,10 +364,11 @@ interface AccountBatchUpdateParam {
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountIds: string[]
-  enabled: boolean
-  concurrencyLimit: number | null
-  weight: number
-  groupIds: string[]
+  enabled?: boolean
+  concurrencyLimit?: number | null
+  weight?: number
+  modelAccess?: AccountModelAccess
+  groupIds?: string[]
 }
 
 interface AccountDeleteParams {
@@ -367,9 +377,11 @@ interface AccountDeleteParams {
 }
 
 interface AccountImportSettings {
+  notes?: string
   enabled: boolean
   concurrencyLimit: number | null
   weight: number
+  modelAccess?: AccountModelAccess
   groupIds: string[]
 }
 

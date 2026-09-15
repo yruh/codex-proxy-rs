@@ -180,6 +180,7 @@ async fn own_key_is_bound_atomically_and_pricing_is_fixed_at_admission() {
                 model_request_id: ModelRequestId::new(id).unwrap(),
                 client_api_key_id: ClientApiKeyId::new(&key.id).unwrap(),
                 lease_ttl: std::time::Duration::from_secs(60),
+                allow_concurrency_acquire: true,
                 limits: Default::default(),
             })
             .await
@@ -244,6 +245,7 @@ async fn own_key_is_bound_atomically_and_pricing_is_fixed_at_admission() {
     database.close().await;
 }
 impl ClientAdmissionPort for AllowAdmission {
+    fn abandon(&self, _: &ClientApiKeyId, _: &ModelRequestId) {}
     fn admit(
         &self,
         _: ClientAdmissionRequest,
@@ -299,6 +301,7 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
         model_request_id: ModelRequestId::new(id).unwrap(),
         client_api_key_id: ClientApiKeyId::new(key).unwrap(),
         lease_ttl: StdDuration::from_secs(60),
+        allow_concurrency_acquire: true,
         limits: Default::default(),
     };
     let one = request("one", "req_one");
@@ -345,6 +348,39 @@ async fn wallet_shares_concurrency_and_charges_once_across_keys() {
         admission.admit(two.clone()).await.unwrap(),
         ClientAdmissionDecision::Rejected(ClientAdmissionRejection::ConcurrencyLimited)
     );
+    admission
+        .release(&one.client_api_key_id, &one.model_request_id)
+        .await
+        .unwrap();
+    // 上游并发队列会重用同一请求 ID；释放后再次准入仍必须占用用户共享槽位。
+    let original_revision: i64 = sqlx::query_scalar(
+        "select pricing_revision from portal_user_requests where request_id='req_one'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    store
+        .set_pricing(gateway_admin::model::portal::PortalPricing {
+            global_multiplier: "1".into(),
+            model_multipliers: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        admission.admit(one.clone()).await.unwrap(),
+        ClientAdmissionDecision::Granted
+    );
+    assert_eq!(
+        admission.admit(two.clone()).await.unwrap(),
+        ClientAdmissionDecision::Rejected(ClientAdmissionRejection::ConcurrencyLimited)
+    );
+    let retry_revision: i64 = sqlx::query_scalar(
+        "select pricing_revision from portal_user_requests where request_id='req_one'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(retry_revision, original_revision);
     admission
         .release(&one.client_api_key_id, &one.model_request_id)
         .await

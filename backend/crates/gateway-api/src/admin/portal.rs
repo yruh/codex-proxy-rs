@@ -1,8 +1,7 @@
 //! 普通用户使用独立 Cookie，管理入口仍强制 AdminAuth。
 
 use super::{
-    AdminAuth, AdminEnvelope, AdminError, AdminJson, AdminSessionState,
-    wire::map_admin_service_error,
+    AdminAuth, AdminEnvelope, AdminError, AdminJson, SessionState, wire::map_admin_service_error,
 };
 use axum::{
     Router,
@@ -22,7 +21,7 @@ const COOKIE_NAME: &str = "cpr_portal_session";
 
 pub fn router<S>() -> Router<S>
 where
-    S: AdminSessionState + Clone + Send + Sync + 'static,
+    S: SessionState + Clone + Send + Sync + 'static,
 {
     Router::new()
         .route("/api/portal/login", post(login::<S>))
@@ -56,7 +55,7 @@ fn view(user: PortalUser) -> Value {
 struct DeleteId {
     id: String,
 }
-async fn delete_user<S: AdminSessionState + Send + Sync>(
+async fn delete_user<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<DeleteId>,
@@ -70,7 +69,7 @@ async fn delete_user<S: AdminSessionState + Send + Sync>(
         .map_err(map_admin_service_error)?;
     Ok(ok(json!({})))
 }
-async fn delete_own_key<S: AdminSessionState + Send + Sync>(
+async fn delete_own_key<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
     AdminJson(body): AdminJson<DeleteId>,
@@ -89,7 +88,7 @@ async fn delete_own_key<S: AdminSessionState + Send + Sync>(
 struct KeyName {
     name: String,
 }
-async fn create_own_key<S: AdminSessionState + Send + Sync>(
+async fn create_own_key<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
     AdminJson(body): AdminJson<KeyName>,
@@ -106,7 +105,7 @@ async fn create_own_key<S: AdminSessionState + Send + Sync>(
         ok(json!({"id":key.id,"name":key.name,"key":key.key,"enabled":key.enabled})),
     ))
 }
-async fn pricing<S: AdminSessionState + Send + Sync>(
+async fn pricing<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -119,7 +118,7 @@ async fn pricing<S: AdminSessionState + Send + Sync>(
         .map_err(map_admin_service_error)?;
     Ok(ok(json!(policy)))
 }
-async fn set_pricing<S: AdminSessionState + Send + Sync>(
+async fn set_pricing<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<gateway_admin::model::portal::PortalPricing>,
@@ -138,7 +137,7 @@ async fn set_pricing<S: AdminSessionState + Send + Sync>(
 struct WalletQuery {
     user_id: String,
 }
-async fn own_wallet<S: AdminSessionState + Send + Sync>(
+async fn own_wallet<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -154,7 +153,7 @@ async fn own_wallet<S: AdminSessionState + Send + Sync>(
         json!({"wallet":service.wallet(&user.id).await.map_err(map_admin_service_error)?,"events":service.wallet_events(&user.id).await.map_err(map_admin_service_error)?}),
     ))
 }
-async fn wallet<S: AdminSessionState + Send + Sync>(
+async fn wallet<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     super::AdminQuery(query): super::AdminQuery<WalletQuery>,
@@ -173,7 +172,7 @@ struct WalletPolicyBody {
     user_id: String,
     policy: gateway_admin::model::portal::WalletPolicy,
 }
-async fn wallet_policy<S: AdminSessionState + Send + Sync>(
+async fn wallet_policy<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<WalletPolicyBody>,
@@ -195,7 +194,7 @@ struct WalletCredit {
     amount: String,
     note: String,
 }
-async fn wallet_credit<S: AdminSessionState + Send + Sync>(
+async fn wallet_credit<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<WalletCredit>,
@@ -232,7 +231,7 @@ struct Login {
     password: String,
 }
 
-async fn login<S: AdminSessionState + Send + Sync>(
+async fn login<S: SessionState + Send + Sync>(
     State(state): State<S>,
     AdminJson(body): AdminJson<Login>,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -249,7 +248,7 @@ async fn login<S: AdminSessionState + Send + Sync>(
     .map_err(|_| AdminError::internal())?;
     Ok(([(SET_COOKIE, header)], ok(view(user))))
 }
-async fn status<S: AdminSessionState + Send + Sync>(
+async fn status<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -262,7 +261,7 @@ async fn status<S: AdminSessionState + Send + Sync>(
         .map_err(map_admin_service_error)?;
     Ok(ok(view(user)))
 }
-async fn logout<S: AdminSessionState + Send + Sync>(
+async fn logout<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -289,7 +288,7 @@ struct ChangePassword {
     old_password: String,
     new_password: String,
 }
-async fn change_password<S: AdminSessionState + Send + Sync>(
+async fn change_password<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
     AdminJson(body): AdminJson<ChangePassword>,
@@ -311,7 +310,7 @@ async fn change_password<S: AdminSessionState + Send + Sync>(
         ok(json!({})),
     ))
 }
-async fn keys<S: AdminSessionState + Send + Sync>(
+async fn keys<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -334,7 +333,7 @@ struct UsageQuery {
     end_time: chrono::DateTime<chrono::Utc>,
     page: u32,
 }
-async fn usage<S: AdminSessionState + Send + Sync>(
+async fn usage<S: SessionState + Send + Sync>(
     State(state): State<S>,
     headers: HeaderMap,
     super::AdminQuery(query): super::AdminQuery<UsageQuery>,
@@ -357,7 +356,7 @@ async fn usage<S: AdminSessionState + Send + Sync>(
         json!({"page":query.page,"pageSize":100,"items":rows.into_iter().map(|r|json!({"id":r.id,"keyId":r.key_id,"model":r.model,"occurredAt":r.occurred_at,"inputTokens":r.input_tokens,"outputTokens":r.output_tokens,"cachedTokens":r.cached_tokens,"estimatedUsd":r.cost})).collect::<Vec<_>>()}),
     ))
 }
-async fn users<S: AdminSessionState + Send + Sync>(
+async fn users<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -372,7 +371,7 @@ async fn users<S: AdminSessionState + Send + Sync>(
         json!({"items":users.into_iter().map(view).collect::<Vec<_>>()}),
     ))
 }
-async fn create_user<S: AdminSessionState + Send + Sync>(
+async fn create_user<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<Login>,
@@ -393,7 +392,7 @@ struct Update {
     enabled: bool,
     password: Option<String>,
 }
-async fn update_user<S: AdminSessionState + Send + Sync>(
+async fn update_user<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<Update>,
@@ -413,7 +412,7 @@ struct Assign {
     key_id: String,
     user_id: String,
 }
-async fn assign_key<S: AdminSessionState + Send + Sync>(
+async fn assign_key<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(state): State<S>,
     AdminJson(body): AdminJson<Assign>,

@@ -14,6 +14,7 @@ use gateway_core::{
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct PgPortalAdmission {
     pool: PgPool,
     inner: Arc<dyn ClientAdmissionPort>,
@@ -65,7 +66,8 @@ impl PgPortalAdmission {
             ));
         }
         let ttl = i64::try_from(request.lease_ttl.as_millis()).map_err(|_| ClientAdmissionError)?;
-        sqlx::query("insert into portal_user_requests(request_id,user_id,key_id,expires_at,pricing_revision) values($1,$2,$3,now()+$4*interval '1 millisecond',(select max(id) from portal_pricing_revisions)) on conflict(request_id) do nothing")
+        // 密钥排队可能先释放用户槽位再重试；重新准入必须恢复槽位，但保留最初固定的计费版本。
+        sqlx::query("insert into portal_user_requests(request_id,user_id,key_id,expires_at,pricing_revision) values($1,$2,$3,now()+$4*interval '1 millisecond',(select max(id) from portal_pricing_revisions)) on conflict(request_id) do update set released=false,expires_at=excluded.expires_at")
             .bind(request.model_request_id.as_str()).bind(&owner).bind(request.client_api_key_id.as_str()).bind(ttl).execute(&mut *tx).await.map_err(|_|ClientAdmissionError)?;
         tx.commit().await.map_err(|_| ClientAdmissionError)?;
         Ok(ClientAdmissionDecision::Granted)
@@ -80,6 +82,19 @@ impl PgPortalAdmission {
     }
 }
 impl ClientAdmissionPort for PgPortalAdmission {
+    fn abandon(&self, key: &ClientApiKeyId, request: &ModelRequestId) {
+        let repository = self.clone();
+        let key = key.clone();
+        let request = request.clone();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            drop(runtime.spawn(async move {
+                if let Err(error) = repository.release(&key, &request).await {
+                    tracing::warn!(%error, "已取消用户准入的租约释放失败，依赖 TTL 收敛");
+                }
+            }));
+        }
+    }
+
     fn admit(
         &self,
         request: ClientAdmissionRequest,

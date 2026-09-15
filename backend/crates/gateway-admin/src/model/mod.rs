@@ -8,6 +8,7 @@ pub mod auth;
 pub mod backup;
 pub mod client_distribution;
 pub mod client_keys;
+pub mod key_usage;
 pub mod local_usage;
 pub mod observability;
 pub mod portal;
@@ -23,6 +24,7 @@ pub mod system;
 pub enum AdminErrorKind {
     Invalid,
     Unauthorized,
+    Forbidden,
     NotFound,
     Conflict,
     RateLimited,

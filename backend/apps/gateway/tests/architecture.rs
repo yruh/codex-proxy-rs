@@ -70,6 +70,8 @@ fn core_value_owners_do_not_depend_on_execution_or_routing() {
             "identity.rs" => Some(&["validation"]),
             "upstream.rs" => Some(&["validation"]),
             "event.rs" => Some(&["metering", "operation", "upstream", "validation"]),
+            "account/selection.rs" => Some(&["account", "concurrency", "identity", "validation"]),
+            "concurrency.rs" => Some(&["error"]),
             "account/store.rs" => Some(&["account", "error", "identity", "validation"]),
             path if path.starts_with("policy/") => Some(&["account", "policy", "validation"]),
             path if path.starts_with("account/") => Some(&["account", "identity", "validation"]),
@@ -176,7 +178,7 @@ const PACKAGE_TO_MEMBER: &[(&str, &str)] = &[
 
 /// Adapter/provider 根门面的稳定合同模块；任何增减都必须同步完成边界审计。
 const ADAPTER_PUBLIC_MODULES: &[(&str, &[&str])] = &[
-    ("crates/gateway-api", &["admin", "openai"]),
+    ("crates/gateway-api", &["admin", "auth", "openai"]),
     (
         "crates/gateway-host",
         &[

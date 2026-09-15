@@ -1,8 +1,7 @@
 //! 同步写入口使用设备凭据，管理入口仍需管理员身份。
 
 use super::{
-    AdminAuth, AdminEnvelope, AdminError, AdminJson, AdminSessionState,
-    wire::map_admin_service_error,
+    AdminAuth, AdminEnvelope, AdminError, AdminJson, SessionState, wire::map_admin_service_error,
 };
 use axum::{
     Router,
@@ -18,7 +17,7 @@ use serde_json::json;
 
 pub fn router<S>() -> Router<S>
 where
-    S: AdminSessionState + Clone + Send + Sync + 'static,
+    S: SessionState + Clone + Send + Sync + 'static,
 {
     Router::new()
         .route("/api/admin/usage/combined", get(combined::<S>))
@@ -41,7 +40,7 @@ struct RangeQuery {
 fn daily(rows: Vec<gateway_admin::ports::local_usage::DailySourceUsage>) -> serde_json::Value {
     json!({"items":rows.into_iter().map(|r|json!({"day":r.day,"source":r.source,"requests":r.requests,"inputTokens":r.input,"outputTokens":r.output,"cachedTokens":r.cached,"estimatedUsd":r.estimated_usd,"pricedRequests":r.priced_requests})).collect::<Vec<_>>()})
 }
-async fn combined<S: AdminSessionState + Send + Sync>(
+async fn combined<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(s): State<S>,
     super::AdminQuery(q): super::AdminQuery<RangeQuery>,
@@ -61,7 +60,7 @@ async fn combined<S: AdminSessionState + Send + Sync>(
         .map_err(map_admin_service_error)?;
     Ok(axum::Json(AdminEnvelope::ok(daily(rows))))
 }
-async fn sync_combined<S: AdminSessionState + Send + Sync>(
+async fn sync_combined<S: SessionState + Send + Sync>(
     State(s): State<S>,
     headers: HeaderMap,
     super::AdminQuery(q): super::AdminQuery<RangeQuery>,
@@ -106,7 +105,7 @@ struct Update {
     id: String,
     enabled: bool,
 }
-async fn devices<S: AdminSessionState + Send + Sync>(
+async fn devices<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(s): State<S>,
 ) -> Result<impl IntoResponse, AdminError> {
@@ -121,7 +120,7 @@ async fn devices<S: AdminSessionState + Send + Sync>(
         json!({"items":rows.into_iter().map(device).collect::<Vec<_>>()}),
     )))
 }
-async fn create<S: AdminSessionState + Send + Sync>(
+async fn create<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(s): State<S>,
     AdminJson(b): AdminJson<Create>,
@@ -137,7 +136,7 @@ async fn create<S: AdminSessionState + Send + Sync>(
         json!({"device":device(d),"token":token}),
     )))
 }
-async fn update<S: AdminSessionState + Send + Sync>(
+async fn update<S: SessionState + Send + Sync>(
     _auth: AdminAuth,
     State(s): State<S>,
     AdminJson(b): AdminJson<Update>,
@@ -200,7 +199,7 @@ impl From<Record> for LocalUsageRecord {
 struct Batch {
     records: Vec<Record>,
 }
-async fn ingest<S: AdminSessionState + Send + Sync>(
+async fn ingest<S: SessionState + Send + Sync>(
     State(s): State<S>,
     headers: HeaderMap,
     AdminJson(b): AdminJson<Batch>,
