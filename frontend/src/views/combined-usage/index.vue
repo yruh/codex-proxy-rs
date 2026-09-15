@@ -204,6 +204,7 @@ onMounted(() => action(load))
         </p>
       </div>
     </BaseCard>
+    <p v-if="days === 0" class="text-xs text-cp-text-secondary">当前周限：按各 OpenAI 账号实际重置周期分别统计至今，再合并；不按自然周计算。</p>
     <WeeklyQuotaCard v-for="account in scopedAccounts.filter(a => a.provider === 'openai')" :key="account.id" :account="account" @account-updated="updateAccount" />
     <div class="grid gap-4 md:grid-cols-3">
       <BaseCard v-for="card in cards" :key="card.source">

@@ -34,14 +34,7 @@ watch(() => props.account.quota.refreshedAtDisplay, () => {
         重试
       </BaseButton>
     </p>
-    <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
-      <div>
-        <p class="text-xs text-cp-text-tertiary">
-          本周已用
-        </p><p class="mt-2 text-2xl font-bold tabular-nums">
-          {{ used == null ? '—' : `${used.toFixed(1)}%` }}
-        </p>
-      </div>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <div>
         <p class="text-xs text-cp-text-tertiary">
           本周剩余
@@ -64,8 +57,8 @@ watch(() => props.account.quota.refreshedAtDisplay, () => {
         </p>
       </div>
     </div>
-    <div v-if="used != null" class="mt-4 h-2 overflow-hidden rounded-full bg-cp-fill-tertiary" role="progressbar" :aria-label="`${account.name}周额度已用比例`" :aria-valuenow="used" :aria-valuemin="0" :aria-valuemax="100">
-      <div class="h-full rounded-full" :class="used >= 100 ? 'bg-cp-error' : 'bg-cp-primary'" :style="{ width: `${Math.max(0, Math.min(100, used))}%` }" />
+    <div v-if="remaining != null" class="mt-4 h-2 overflow-hidden rounded-full bg-cp-fill-tertiary" role="progressbar" :aria-label="`${account.name}周额度剩余比例`" :aria-valuenow="remaining" :aria-valuemin="0" :aria-valuemax="100">
+      <div class="h-full rounded-full" :class="remaining <= 0 ? 'bg-cp-error' : 'bg-cp-primary'" :style="{ width: `${Math.max(0, Math.min(100, remaining))}%` }" />
     </div>
     <div class="mt-3 flex flex-wrap justify-between gap-2 text-xs text-cp-text-tertiary">
       <span>观测 {{ forecast?.source?.observedAtDisplay || account.quota.refreshedAtDisplay }}</span><span>重置 {{ resetAt }} · 北京时间</span>

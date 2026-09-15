@@ -65,7 +65,7 @@ impl PortalStore for PgPortalStore {
             .await
             .map_err(failure)?;
         tx.commit().await.map_err(failure)?;
-        Ok(revision)
+        crate::value::admin_revision(revision)
     }
     async fn delete_own_key(
         &self,
@@ -97,7 +97,7 @@ impl PortalStore for PgPortalStore {
             ));
         }
         tx.commit().await.map_err(failure)?;
-        Ok(revision)
+        crate::value::admin_revision(revision)
     }
     async fn pricing(&self) -> AdminStoreResult<gateway_admin::model::portal::PortalPricing> {
         let value: serde_json::Value = sqlx::query_scalar(
