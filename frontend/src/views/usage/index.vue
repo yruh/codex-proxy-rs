@@ -9,7 +9,9 @@ import BaseIconButton from '@/components/base/BaseIconButton.vue'
 import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSegmented from '@/components/base/BaseSegmented.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
+import BaseTableColumnSettings from '@/components/base/BaseTable/BaseTableColumnSettings.vue'
 import BaseTablePagination from '@/components/base/BaseTable/BaseTablePagination.vue'
+import { useTableColumns } from '@/components/base/BaseTable/useTableColumns'
 import ProviderFilterSegmented from '@/components/ProviderFilterSegmented.vue'
 import PricingSummary from '../portal-users/PricingSummary.vue'
 import OpsErrorPanel from './components/OpsErrorPanel.vue'
@@ -24,6 +26,7 @@ import { useUsageTimeRange } from './composables/useUsageTimeRange'
 import { usageRecordColumns, usageTimeRangeOptions } from './constants'
 
 const recordView = shallowRef('success')
+const { visibleColumns, columnOptions, setColumnVisible, resetColumns } = useTableColumns(usageRecordColumns, 'usage-records')
 const recordViewOptions = [
   { label: '成功记录', value: 'success' },
   { label: '错误排查', value: 'errors' },
@@ -136,12 +139,20 @@ watch(timeRange, () => {
             :loading="loading"
             :refreshing="refreshingList"
             @refresh="refreshUsageRecords"
-          />
+          >
+            <template #actions>
+              <BaseTableColumnSettings
+                :options="columnOptions"
+                @change="setColumnVisible"
+                @reset="resetColumns"
+              />
+            </template>
+          </UsageFilters>
 
           <div class="flex min-h-0 min-w-0 flex-col">
             <UsageRecordsTable
               class="min-h-0 flex-1"
-              :columns="usageRecordColumns"
+              :columns="visibleColumns"
               :rows="records"
               :loading="loading"
               empty-text="暂无使用记录"

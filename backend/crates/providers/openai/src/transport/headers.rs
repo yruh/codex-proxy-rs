@@ -8,12 +8,30 @@ use reqwest::header::{
 };
 
 use super::client::{
-    CodexBackendClient, CodexClientResult, CodexRequestContext, openai_subagent_from_metadata,
+    CodexBackendClient, CodexClientResult, CodexRequestContext, OpenAiUpstreamProtocol,
+    openai_subagent_from_metadata,
 };
 use super::profile::{CodexResidency, CodexWireProfile};
 use super::protocol::responses::CodexResponsesRequest;
 
 const CODEX_RESIDENCY_HEADER: &str = "x-openai-internal-codex-residency";
+
+/// 不透传下游携带的认证、账号及相关身份字段，避免影响网关选定的上游身份。
+/// 上游需要的官方身份头由网关构造；这里也包含通用认证和 Cookie 字段。
+pub(super) fn is_managed_identity_header(name: &str) -> bool {
+    matches!(
+        name,
+        "authorization"
+            | "x-api-key"
+            | "x-openai-actor-authorization"
+            | "cookie"
+            | "cookie2"
+            | "chatgpt-account-id"
+            | "chatgpt-project-id"
+            | "openai-organization"
+            | "openai-project"
+    )
+}
 
 /// 构造 Codex Core 为模型请求设置的稳定身份请求头。
 pub fn build_codex_model_headers(
@@ -87,6 +105,11 @@ impl CodexBackendClient {
         profile: &CodexWireProfile,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
+        if self.protocol == OpenAiUpstreamProtocol::ResponsesApi {
+            let mut headers = HeaderMap::new();
+            headers.insert(AUTHORIZATION, HeaderValue::from_str(context.authorization)?);
+            return Ok(headers);
+        }
         let mut headers =
             build_codex_model_headers(profile, context.authorization, context.account_id)?;
         insert_optional_header(&mut headers, "cookie", context.cookie_header)?;
@@ -114,11 +137,13 @@ impl CodexBackendClient {
         let mut headers = self.response_headers(request, context)?;
         headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        insert_optional_protocol_header(
-            &mut headers,
-            X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER,
-            request.responses_lite.as_deref(),
-        );
+        if self.protocol == OpenAiUpstreamProtocol::Codex {
+            insert_optional_protocol_header(
+                &mut headers,
+                X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER,
+                request.responses_lite.as_deref(),
+            );
+        }
         Ok(headers)
     }
 
@@ -142,6 +167,15 @@ impl CodexBackendClient {
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
         let mut headers = self.model_request_headers(&self.profile.snapshot(), context)?;
+        if self.protocol == OpenAiUpstreamProtocol::ResponsesApi {
+            // 上游身份只来自该账号；客户端的 OAuth 画像与 Cookie 不跨域转发。
+            headers.insert(
+                HeaderName::from_static("x-client-request-id"),
+                HeaderValue::from_str(context.request_id)?,
+            );
+            append_passthrough_headers(&mut headers, request, self.protocol);
+            return Ok(headers);
+        }
         headers.insert(
             HeaderName::from_static("x-client-request-id"),
             HeaderValue::from_str(context.request_id)?,
@@ -181,9 +215,26 @@ impl CodexBackendClient {
             None => format!("model={}", request.model()),
         };
         insert_optional_protocol_header(&mut headers, "x-codex-routing-hint", Some(&routing_hint));
-        for name in request.passthrough_headers.keys() {
-            // 身份与传输字段只由画像/正文生成；其余协议头保留原始多值字节。
-            if matches!(
+        append_passthrough_headers(&mut headers, request, self.protocol);
+        Ok(headers)
+    }
+}
+
+fn append_passthrough_headers(
+    headers: &mut HeaderMap,
+    request: &CodexResponsesRequest,
+    protocol: OpenAiUpstreamProtocol,
+) {
+    for name in request.passthrough_headers.keys() {
+        // 身份与传输字段只由画像/正文生成；其余协议头保留原始多值字节。
+        if (protocol == OpenAiUpstreamProtocol::ResponsesApi
+            && (name.as_str().starts_with("x-codex-")
+                || name.as_str().starts_with("x-openai-internal-")
+                || matches!(
+                    name.as_str(),
+                    "session-id" | "thread-id" | "x-openai-actor-authorization"
+                )))
+            || matches!(
                 name.as_str(),
                 "originator"
                     | "user-agent"
@@ -197,21 +248,19 @@ impl CodexBackendClient {
                     | "content-type"
                     | "content-encoding"
                     | "x-codex-routing-hint"
-                    | "x-codex-installation-id"
                     | "x-codex-turn-id"
                     | "x-oai-attestation"
                     | "x-oai-is"
                     | "x-oai-is-update"
                     | X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER
-            ) {
-                continue;
-            }
-            headers.remove(name);
-            for value in request.passthrough_headers.get_all(name) {
-                headers.append(name.clone(), value.clone());
-            }
+            )
+        {
+            continue;
         }
-        Ok(headers)
+        headers.remove(name);
+        for value in request.passthrough_headers.get_all(name) {
+            headers.append(name.clone(), value.clone());
+        }
     }
 }
 

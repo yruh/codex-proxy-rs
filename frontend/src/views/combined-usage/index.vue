@@ -54,6 +54,8 @@ const calendar = computed(() => {
 const peak = computed(() => Math.max(1, ...calendar.value.map(d => d.local + d.proxy)))
 const activeDays = computed(() => calendar.value.filter(d => d.local + d.proxy > 0).length)
 const scopedAccounts = computed(() => accounts.value.filter(a => !accountId.value || a.id === accountId.value))
+// API Key 账号没有套餐周限，不能让它阻断 OAuth 账号的周期统计。
+const weeklyAccounts = computed(() => scopedAccounts.value.filter(a => a.provider === 'openai' && a.authenticationKind !== 'api_key'))
 function updateAccount(account: Account) {
   accounts.value = accounts.value.map(item => item.id === account.id ? account : item)
 }
@@ -101,10 +103,9 @@ async function load() {
   await loadAccounts()
   let ranges = [{ id: accountId.value, start: new Date(new Date(`${dayKey(end)}T00:00:00+08:00`).getTime() - (days.value - 1) * 86400000), end }]
   if (days.value === 0) {
-    const weeklyAccounts = scopedAccounts.value.filter(account => account.provider === 'openai')
-    if (!weeklyAccounts.length)
-      throw new Error('当前周限仅支持有上游周额度的 OpenAI 账号')
-    ranges = await Promise.all(weeklyAccounts.map(async (account) => {
+    if (!weeklyAccounts.value.length)
+      throw new Error('当前周限仅支持有上游周额度的 OpenAI OAuth 账号；API Key 账号请按日期查看用量')
+    ranges = await Promise.all(weeklyAccounts.value.map(async (account) => {
       const data = await getAccountQuotaForecast({ accountId: account.id })
       const forecast = data.forecasts.find(item => item.period === 'weekly' && !item.extrapolated)
       const reset = new Date(forecast?.source?.resetAt || '')
@@ -207,10 +208,10 @@ onMounted(() => action(load))
       </div>
     </BaseCard>
     <p v-if="days === 0" class="text-xs text-cp-text-secondary">
-      当前周限：按各 OpenAI 账号实际重置周期分别统计至今，再合并；不按自然周计算。
+      当前周限：按各 OpenAI OAuth 账号实际重置周期分别统计至今，再合并；不按自然周计算，不含无周限的 API Key 账号。
     </p>
     <PricingSummary @saved="pricingRevision++" />
-    <WeeklyQuotaCard v-for="account in scopedAccounts.filter(a => a.provider === 'openai')" :key="account.id" :account="account" :pricing-revision="pricingRevision" @account-updated="updateAccount" />
+    <WeeklyQuotaCard v-for="account in weeklyAccounts" :key="account.id" :account="account" :pricing-revision="pricingRevision" @account-updated="updateAccount" />
     <div class="grid gap-4 md:grid-cols-3">
       <BaseCard v-for="card in cards" :key="card.source">
         <div class="flex items-center justify-between">
