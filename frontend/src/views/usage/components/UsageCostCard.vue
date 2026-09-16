@@ -116,7 +116,7 @@ function legendNames() {
     return ['缓存节省']
   if (activeView.value === 'cache')
     return ['缓存 Token 占比', '命中请求率']
-  return hasNoCacheCost.value ? ['实际费用', '无缓存费用'] : ['实际费用']
+  return hasNoCacheCost.value ? ['上游成本', '无缓存费用'] : ['上游成本']
 }
 
 function axisFormatter() {
@@ -160,7 +160,7 @@ function chartSeries(theme: UsageChartPalette): LineSeriesOption[] {
 
   const series = [
     ...usageGapAwareLineSeries(
-      '实际费用',
+      '上游成本',
       zeroInactiveValues(
         chartPoints.map(point => decimalDisplayNumber(point.estimatedCost)),
         requestActivity.value,
@@ -211,7 +211,7 @@ function formatTooltip(params: unknown) {
 
   const lines = [
     usageTooltipItem(
-      '实际费用',
+      '上游成本',
       formatUsd(costAmount(point.estimatedCost, pointIndex)),
       theme.success,
     ),
@@ -235,7 +235,7 @@ function costAmount(value: string | null, pointIndex: number) {
   <BaseCard
     as="article"
     title="成本效率"
-    description="实际费用、缓存节省、服务层溢价与单位成本"
+    description="上游成本、缓存节省、服务层溢价与单位成本"
     class="min-h-90 xl:h-full"
   >
     <template #actions>
@@ -246,7 +246,7 @@ function costAmount(value: string | null, pointIndex: number) {
       <div class="grid min-h-66 gap-3">
         <div v-if="hasData" class="grid grid-cols-5 gap-1 rounded-xl bg-cp-fill-quaternary/45 p-2">
           <div class="grid min-w-0 gap-1 px-1.5">
-            <span class="truncate text-[10px] font-bold text-cp-text-quaternary">实际费用</span>
+            <span class="truncate text-[10px] font-bold text-cp-text-quaternary">上游成本</span>
             <strong class="truncate font-mono text-cp-sm font-heavy tabular-nums text-cp-text" :title="formatUsd(cost.estimatedCost)">
               {{ formatUsd(cost.estimatedCost) }}
             </strong>

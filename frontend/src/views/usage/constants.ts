@@ -26,7 +26,7 @@ export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
   { key: 'upstreamTransport', label: '上游', kind: 'status', size: 'md' },
   { key: 'clientTransport', label: '接入', kind: 'status', size: 'md' },
   { key: 'tokenDetails', label: 'TOKEN', kind: 'numeric', size: 'xl' },
-  { key: 'billing', label: '费用', kind: 'numeric', size: 'lg' },
+  { key: 'billing', label: '上游成本 / 计费', kind: 'numeric', size: 'lg' },
   { key: 'latency', label: '延迟', kind: 'numeric', size: 'xl' },
   { key: 'createdAtDisplay', label: '时间', kind: 'datetime' },
   { key: 'clientIp', label: 'IP', kind: 'custom', size: '3xl' },
