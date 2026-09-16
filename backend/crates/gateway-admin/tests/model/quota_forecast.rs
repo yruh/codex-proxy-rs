@@ -104,6 +104,7 @@ fn samples(quota: &ProviderQuota) -> Vec<QuotaForecastSample> {
                     unavailable_cost_count: usage.cost_coverage.partial_count
                         + usage.cost_coverage.unavailable_count,
                     usd: usd.map_or(0.0, |cost| cost.amount.as_str().parse().unwrap()),
+                    priced_usd: None,
                     excluded_request_count: 0,
                 },
             })
@@ -333,6 +334,18 @@ fn entirely_unknown_costs_leave_only_money_estimates_unavailable() {
     assert_eq!(week.estimated_tokens, Some(5_000));
     assert_eq!(week.estimated_usd, None);
     assert_eq!(week.remaining_usd, None);
+}
+
+#[test]
+fn pricing_estimates_preserve_original_capacity_and_use_weighted_sample() {
+    let source = quota(vec![window("week", 7)]);
+    let mut sample = samples(&source).remove(0);
+    sample.usage.priced_usd = Some(sample.usage.usd * 1.6);
+    let [week, _] = account_quota_forecasts(&source, now() - Duration::days(60), now(), &[sample]);
+    assert_eq!(week.estimated_usd, Some(10.0));
+    assert_eq!(week.estimated_priced_usd, Some(16.0));
+    assert!((week.remaining_priced_usd.unwrap() - week.remaining_usd.unwrap() * 1.6).abs() < 1e-9);
+    assert_eq!(week.effective_pricing_multiplier, Some(1.6));
 }
 
 #[test]

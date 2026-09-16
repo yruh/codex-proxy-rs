@@ -11,6 +11,7 @@ import BaseSegmented from '@/components/base/BaseSegmented.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTablePagination from '@/components/base/BaseTable/BaseTablePagination.vue'
 import ProviderFilterSegmented from '@/components/ProviderFilterSegmented.vue'
+import PricingSummary from '../portal-users/PricingSummary.vue'
 import OpsErrorPanel from './components/OpsErrorPanel.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
@@ -98,6 +99,7 @@ watch(timeRange, () => {
     </p>
 
     <UsageSummaryCards :summary="summary" />
+    <PricingSummary />
     <UsageInsightsGrid
       v-model:diagnostic-dimension="diagnosticDimension"
       :overview="insights.overview"

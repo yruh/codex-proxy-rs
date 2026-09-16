@@ -315,6 +315,9 @@ pub struct AccountQuotaForecastData {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuotaForecastView {
+    pub estimated_priced_usd: Option<f64>,
+    pub remaining_priced_usd: Option<f64>,
+    pub effective_pricing_multiplier: Option<f64>,
     pub period: &'static str,
     pub target_days: f64,
     pub extrapolated: bool,

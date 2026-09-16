@@ -74,6 +74,7 @@ pub struct BillingView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
+    pub user_charge: Option<gateway_admin::model::observability::UserCharge>,
     pub portal_username: Option<String>,
     pub id: String,
     pub provider: Option<String>,
@@ -107,6 +108,7 @@ pub struct UsageListRecordView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageRecordView {
+    pub user_charge: Option<gateway_admin::model::observability::UserCharge>,
     pub id: String,
     pub request_id: String,
     pub client_api_key_id: Option<String>,

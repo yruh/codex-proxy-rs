@@ -430,6 +430,7 @@ pub(crate) fn admin_usage_list_record(
         }
     };
     Ok(admin_observability::UsageListRecord {
+        user_charge: record.user_charge,
         portal_username: record.portal_username,
         id: record.id,
         endpoint: record.endpoint,
@@ -498,6 +499,7 @@ pub(crate) fn admin_usage_record(
         }
     };
     Ok(admin_observability::UsageRecord {
+        user_charge: record.user_charge,
         id: record.id,
         client_api_key_ref: record.client_api_key_ref,
         config_revision: record.config_revision,
@@ -757,6 +759,11 @@ pub(crate) fn usage_list_record_from_row(
     row: &sqlx::postgres::PgRow,
 ) -> StoreResult<UsageListRecord> {
     Ok(UsageListRecord {
+        user_charge: get::<Option<sqlx::types::Json<admin_observability::UserCharge>>>(
+            row,
+            "user_charge",
+        )?
+        .map(|value| value.0),
         portal_username: get(row, "portal_username")?,
         id: get(row, "id")?,
         endpoint: get(row, "endpoint")?,
@@ -806,6 +813,11 @@ pub(crate) fn usage_list_record_from_row(
 
 pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<UsageRecord> {
     Ok(UsageRecord {
+        user_charge: get::<Option<sqlx::types::Json<admin_observability::UserCharge>>>(
+            row,
+            "user_charge",
+        )?
+        .map(|value| value.0),
         id: get(row, "id")?,
         client_api_key_ref: get(row, "client_api_key_ref")?,
         config_revision: unsigned(row, "config_revision")?,

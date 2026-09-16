@@ -138,7 +138,11 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select mr.id,
+            (select jsonb_build_object('baseCostUsd', e.base_cost_usd::text,
+                 'multiplier', e.multiplier::text, 'chargedUsd', (-e.amount_usd)::text)
+               from portal_wallet_events e where e.id = 'usage:' || mr.id
+                 and e.kind = 'usage' and e.base_cost_usd is not null and e.multiplier is not null) as user_charge, mr.endpoint, mr.client_transport, mr.requested_model_id,
             (select u.username from portal_key_owners owner join portal_users u on u.id = owner.user_id
              where owner.client_api_key_id = mr.client_api_key_ref) as portal_username,
             mr.provider_kind, mr.provider_account_ref,
@@ -160,7 +164,11 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
      from model_requests mr";
 
 pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
-    "select mr.id, mr.client_api_key_ref, mr.config_revision,
+    "select mr.id,
+            (select jsonb_build_object('baseCostUsd', e.base_cost_usd::text,
+                 'multiplier', e.multiplier::text, 'chargedUsd', (-e.amount_usd)::text)
+               from portal_wallet_events e where e.id = 'usage:' || mr.id
+                 and e.kind = 'usage' and e.base_cost_usd is not null and e.multiplier is not null) as user_charge, mr.client_api_key_ref, mr.config_revision,
             mr.routing_scope, mr.routing_group_refs, mr.routing_group_names_snapshot,
             mr.protocol, mr.operation,
             mr.endpoint, mr.client_transport, mr.requested_model_id,

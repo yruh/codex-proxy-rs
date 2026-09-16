@@ -55,6 +55,12 @@ async fn quota_forecast_combines_local_usage_at_matching_observation_boundaries(
         sqlx::query("insert into local_usage_records(device_id,record_id,revision,occurred_at,input_tokens,output_tokens,cached_tokens,estimated_usd,excluded) values($1,$2,1,$3,900,100,800,$4::text::numeric,$5)")
             .bind(device).bind(id).bind(start + TimeDelta::seconds(seconds)).bind(cost).bind(excluded).execute(&database.pool).await.unwrap();
     }
+    sqlx::query("insert into portal_pricing_revisions(policy) values ('{\"globalMultiplier\":\"1.2\",\"modelMultipliers\":{\"test\":\"1.6\"}}')")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update local_usage_records set model='test' where record_id='start'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
     let history = admin_account_store(&database.pool)
         .load_quota_forecast_history(&AccountUsageWindowQuery {
             account_id: "acct_dual".into(),
@@ -71,12 +77,86 @@ async fn quota_forecast_combines_local_usage_at_matching_observation_boundaries(
     assert_eq!(history.usage.tokens, 3100);
     assert_eq!(history.usage.cached_tokens, 2400);
     assert_eq!(history.usage.usd, 6.0);
+    // 代理 1×1.6 + 本地 2×1.6 + 未覆盖模型 3×1.2，不能整笔套 1.6。
+    assert!((history.usage.priced_usd.unwrap() - 8.4).abs() < 1e-9);
+    assert_eq!(history.points[0].usage.priced_usd, history.usage.priced_usd);
     assert_eq!(history.usage.known_cost_count, 3);
     assert_eq!(history.usage.unavailable_cost_count, 1);
     assert_eq!(history.points.len(), 1);
     assert_eq!(history.points[0].usage.tokens, 2100);
     assert_eq!(history.points[0].usage.usd, 6.0);
     assert_eq!(history.pending_request_count, 0);
+    database.close().await;
+}
+
+#[tokio::test]
+async fn usage_reads_settled_multiplier_without_repricing_history() {
+    let Some(database) = TestDatabase::create("usage_pricing_view").await else {
+        return;
+    };
+    PgProviderAccountRepository::new(database.pool.clone())
+        .insert_provider_account(account("acct_pricing", "pricing"))
+        .await
+        .unwrap();
+    let start = Utc::now() - TimeDelta::minutes(5);
+    for id in ["priced", "unsettled"] {
+        seed_model_request(
+            &database.pool,
+            ModelRequestSeed {
+                request_id: id,
+                account_id: "acct_pricing",
+                provider_kind: "openai",
+                model: "gpt-test",
+                total_tokens: 100,
+                cost_amount: "1",
+                started_at: start,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "insert into portal_users(id,username,password_hash) values ('student','student','test')",
+    )
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query("insert into portal_wallet_events(id,user_id,kind,amount_usd,base_cost_usd,multiplier) values ('usage:priced','student','usage',-1.6,1,1.6)")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("insert into portal_pricing_revisions(policy) values ('{\"globalMultiplier\":\"9\",\"modelMultipliers\":{}}')")
+        .execute(&database.pool).await.unwrap();
+    let repository = super::super::observability_repository(&database.pool);
+    let records = repository
+        .list_usage_records(UsageRecordQuery {
+            range: ObservabilityRange::new(start, Utc::now()).unwrap(),
+            filter: UsageRecordFilter::default(),
+            current_page: 1,
+            page_size: ObservabilityPageSize::new(10).unwrap(),
+        })
+        .await
+        .unwrap();
+    let settled = records
+        .items
+        .iter()
+        .find(|r| r.id == "priced")
+        .unwrap()
+        .user_charge
+        .as_ref()
+        .unwrap();
+    assert_eq!(settled.multiplier.parse::<f64>().unwrap(), 1.6);
+    assert_eq!(settled.charged_usd.parse::<f64>().unwrap(), 1.6);
+    assert_eq!(settled.base_cost_usd.parse::<f64>().unwrap(), 1.0);
+    assert!(
+        records
+            .items
+            .iter()
+            .find(|r| r.id == "unsettled")
+            .unwrap()
+            .user_charge
+            .is_none()
+    );
+    let detail = repository.usage_record_detail("priced").await.unwrap();
+    assert_eq!(detail.request.user_charge.as_ref(), Some(settled));
     database.close().await;
 }
 

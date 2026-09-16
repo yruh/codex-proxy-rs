@@ -840,6 +840,7 @@ fn total_record(
     now: DateTime<Utc>,
 ) -> UsageListRecord {
     UsageListRecord {
+        user_charge: None,
         portal_username: None,
         id: id.to_owned(),
         endpoint: "/v1/responses".to_owned(),

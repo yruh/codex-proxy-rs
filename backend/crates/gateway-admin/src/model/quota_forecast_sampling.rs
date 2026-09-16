@@ -20,6 +20,8 @@ pub struct QuotaForecastUsage {
     pub known_cost_count: u64,
     pub unavailable_cost_count: u64,
     pub usd: f64,
+    /// 按当前逐模型计费策略折算，仅用于容量预测。
+    pub priced_usd: Option<f64>,
     pub excluded_request_count: u64,
 }
 
@@ -46,6 +48,13 @@ impl QuotaForecastUsage {
                 .unavailable_cost_count
                 .checked_sub(baseline.unavailable_cost_count)?,
             usd: usd.max(0.0),
+            priced_usd: self
+                .priced_usd
+                .zip(baseline.priced_usd)
+                .and_then(|(current, base)| {
+                    let delta = current - base;
+                    (delta.is_finite() && delta >= -1e-9).then_some(delta.max(0.0))
+                }),
             excluded_request_count: self
                 .excluded_request_count
                 .checked_sub(baseline.excluded_request_count)?,

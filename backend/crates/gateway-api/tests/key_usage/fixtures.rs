@@ -89,6 +89,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
 
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
+        user_charge: None,
         portal_username: None,
         id: "req-visible".to_owned(),
         endpoint: "/v1/responses".to_owned(),

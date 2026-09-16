@@ -173,7 +173,9 @@ const billingItems = computed(() => {
   }
 
   return [
-    { label: '总费用', value: value.totalAmountDisplay, mono: true },
+    { label: '上游成本', value: value.totalAmountDisplay, mono: true },
+    { label: '用户计费倍率', value: props.record?.userCharge ? `${Number(props.record.userCharge.multiplier)}×` : '无已结算用户账单', mono: true },
+    { label: '实际扣款', value: props.record?.userCharge ? `$${props.record.userCharge.chargedUsd}` : '—', mono: true },
     { label: '输入', value: value.inputAmountDisplay, mono: true },
     { label: '输出', value: value.outputAmountDisplay, mono: true },
     { label: '缓存读取', value: value.cacheReadAmountDisplay, mono: true },
@@ -184,7 +186,7 @@ const billingItems = computed(() => {
     { label: '缓存单价', value: value.cacheReadPriceDisplay, mono: true },
     { label: '缓存写入单价', value: value.cacheWritePriceDisplay, mono: true },
     { label: '服务档位', value: value.serviceTierDisplay },
-    { label: '倍率', value: value.multiplierDisplay, mono: true },
+    { label: '服务档位倍率', value: value.multiplierDisplay, mono: true },
   ]
 })
 

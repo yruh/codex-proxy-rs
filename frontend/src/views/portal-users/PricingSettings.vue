@@ -9,6 +9,7 @@ import BaseModal from '@/components/base/BaseModal/index.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 
 interface Pricing { globalMultiplier: string, modelMultipliers: Record<string, string> }
+const emit = defineEmits<{ saved: [] }>()
 const open = ref(false)
 const busy = ref(false)
 const loaded = ref(false)
@@ -89,6 +90,7 @@ async function save() {
       throw new Error('模型 ID 不能重复')
     await portalRequest('/api/admin/portal/pricing', { globalMultiplier: globalMultiplier.value, modelMultipliers: Object.fromEntries(entries) })
     saved.value = true
+    emit('saved')
   }
   catch (e) { error.value = e instanceof Error ? e.message : '保存失败' }
   finally { busy.value = false }
@@ -141,7 +143,7 @@ async function save() {
         全部模型使用全局倍率。
       </p>
       <p class="text-xs leading-relaxed text-cp-text-tertiary">
-        保存后对新请求生效。进行中的请求和历史扣费保留原规则；双端统计的上游等价成本保持原价。倍率范围为 0.000001 至 1000。
+        保存后对新请求生效。进行中的请求和历史扣费保留原规则；双端统计保留原价，并额外按当前规则预测计费容量。倍率范围为 0.000001 至 1000。
       </p>
       <p v-if="error" role="alert" class="text-sm text-cp-error-text">
         {{ error }}

@@ -67,7 +67,14 @@ export interface UsageRecordMetadata {
   [key: string]: unknown
 }
 
+export interface UserCharge {
+  baseCostUsd: string
+  multiplier: string
+  chargedUsd: string
+}
+
 export interface UsageListRecord {
+  userCharge?: UserCharge | null
   portalUsername: string | null
   id: string
   provider: string | null
@@ -98,6 +105,7 @@ export interface UsageListRecord {
 }
 
 export interface UsageRecord {
+  userCharge?: UserCharge | null
   id: string
   requestId: string
   clientApiKeyId: string | null

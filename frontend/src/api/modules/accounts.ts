@@ -153,6 +153,9 @@ export interface Account {
 }
 
 export interface AccountQuotaForecast {
+  estimatedPricedUsd?: number | null
+  remainingPricedUsd?: number | null
+  effectivePricingMultiplier?: number | null
   period: 'weekly' | 'monthly'
   targetDays: number
   extrapolated: boolean

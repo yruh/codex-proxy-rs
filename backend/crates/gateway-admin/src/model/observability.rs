@@ -532,9 +532,19 @@ pub struct DashboardObservation {
     pub recent_requests: Vec<UsageListRecord>,
 }
 
+/// 已结算的钱包事实；不使用当前策略重新计算历史扣款。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserCharge {
+    pub base_cost_usd: String,
+    pub multiplier: String,
+    pub charged_usd: String,
+}
+
 /// 使用记录表格的窄读模型。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageListRecord {
+    pub user_charge: Option<UserCharge>,
     pub portal_username: Option<String>,
     pub id: String,
     pub endpoint: String,
@@ -585,6 +595,7 @@ pub struct UsageListRecord {
 /// 一次完整模型请求的公共观测记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageRecord {
+    pub user_charge: Option<UserCharge>,
     pub id: String,
     pub client_api_key_ref: String,
     pub config_revision: u64,

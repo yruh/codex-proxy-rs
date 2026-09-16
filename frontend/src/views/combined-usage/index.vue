@@ -13,11 +13,13 @@ import BaseModal from '@/components/base/BaseModal/index.vue'
 import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
+import PricingSummary from '../portal-users/PricingSummary.vue'
 import WeeklyQuotaCard from './components/WeeklyQuotaCard.vue'
 
 interface Daily { day: string, source: string, requests: number, inputTokens: string, outputTokens: string, cachedTokens: string, estimatedUsd: string | null, pricedRequests: number }
 interface Device { id: string, name: string, accountId: string, enabled: boolean, lastSyncAt: string | null }
 const showDevice = ref(false)
+const pricingRevision = ref(0)
 const columns: BaseTableColumn<Daily>[] = [
   { key: 'day', label: '日期', size: 'lg' },
   { key: 'source', label: '来源', size: 'lg' },
@@ -204,8 +206,11 @@ onMounted(() => action(load))
         </p>
       </div>
     </BaseCard>
-    <p v-if="days === 0" class="text-xs text-cp-text-secondary">当前周限：按各 OpenAI 账号实际重置周期分别统计至今，再合并；不按自然周计算。</p>
-    <WeeklyQuotaCard v-for="account in scopedAccounts.filter(a => a.provider === 'openai')" :key="account.id" :account="account" @account-updated="updateAccount" />
+    <p v-if="days === 0" class="text-xs text-cp-text-secondary">
+      当前周限：按各 OpenAI 账号实际重置周期分别统计至今，再合并；不按自然周计算。
+    </p>
+    <PricingSummary @saved="pricingRevision++" />
+    <WeeklyQuotaCard v-for="account in scopedAccounts.filter(a => a.provider === 'openai')" :key="account.id" :account="account" :pricing-revision="pricingRevision" @account-updated="updateAccount" />
     <div class="grid gap-4 md:grid-cols-3">
       <BaseCard v-for="card in cards" :key="card.source">
         <div class="flex items-center justify-between">

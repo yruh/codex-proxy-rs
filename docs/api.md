@@ -962,6 +962,10 @@ request/response/upstream ID、outcome 与搜索文本。诊断 `dimension` 可�
 省略时包含所有用户及未分配用户的密钥。密钥删除后保留的归属仍参与筛选。
 用量列表与错误列表的 `portalUsername` 返回所属用户名，未分配用户时为 `null`；上游账号字段保持原义。
 
+用量列表和详情的 `userCharge` 为已结算的钱包事实，包含十进制字符串 `baseCostUsd`、`multiplier`、`chargedUsd`。没有对应已结算账单时为 `null`，不会使用当前倍率重算历史；原有 `billing.multiplierDisplay` 仍表示上游服务档位倍率。
+
+额度预测额外返回 `estimatedPricedUsd`、`remainingPricedUsd` 和 `effectivePricingMultiplier`。这些值按同一额度样本、当前逐模型倍率折算；综合倍率以样本成本加权，不是全局策略，也不是实际历史扣款。无有效样本时返回 `null`。
+
 请求记录列表的 `search` 使用字面量前缀匹配，支持请求 ID、Client Key ID / 名称、
 账号 ID、账号邮箱与名称、请求 / 上游模型 ID、上游请求 ID。密钥名称不区分大小写，其他字段区分大小写。
 密钥名称按当前密钥记录检索，改名后使用新名称，删除后仍可按 Client Key ID 查询历史记录。

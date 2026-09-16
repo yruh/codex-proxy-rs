@@ -16,6 +16,7 @@ import { formatDuration } from './format'
 
 // Usage 记录的规范化 view model：组件只消费这个形状。
 export interface UsageViewModel {
+  userCharge: UsageListRecord['userCharge']
   id: string
   requestId: string
   clientApiKeyId: string | null
@@ -133,6 +134,7 @@ export function normalizeUsageRecord(record: UsageRecordDetail): UsageViewModel 
     subagentKind: record.subagentKind,
     tokenDetails: record.tokenDetails,
     billing: record.billing,
+    userCharge: record.userCharge,
     costs: record.costs,
     costCoverage: record.costCoverage,
     firstTokenLatencyMsDisplay: record.firstTokenLatencyMsDisplay,

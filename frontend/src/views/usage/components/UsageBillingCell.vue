@@ -6,7 +6,7 @@ import { usageBilling, usageBillingText } from '../utils/records'
 import UsageDetailPopover from './UsageDetailPopover.vue'
 
 const props = defineProps<{
-  record: Pick<UsageDisplayRecord, 'billing'>
+  record: Pick<UsageDisplayRecord, 'billing' | 'userCharge'>
 }>()
 
 const billing = computed(() => usageBilling(props.record))
@@ -17,9 +17,15 @@ const billingItems = computed(() => {
 
   return [
     { label: '服务档位', value: value.serviceTierDisplay, tone: 'info' },
-    { label: '倍率', value: value.multiplierDisplay, tone: 'info' },
-    { label: '总费用', value: value.totalAmountDisplay, tone: 'success' },
+    { label: '服务档位倍率', value: value.multiplierDisplay, tone: 'info' },
+    { label: '上游成本', value: value.totalAmountDisplay, tone: 'success' },
     { label: '标准费用', value: value.standardAmountDisplay, tone: 'default' },
+    ...(props.record.userCharge
+      ? [
+          { label: '用户计费倍率', value: `${Number(props.record.userCharge.multiplier)}×`, tone: 'info' },
+          { label: '实际扣款', value: `$${props.record.userCharge.chargedUsd}`, tone: 'success' },
+        ]
+      : [{ label: '实际扣款', value: '无已结算用户账单', tone: 'default' }]),
   ]
 })
 
@@ -52,6 +58,9 @@ function itemValueClass(tone?: string, accent?: boolean) {
   <div class="flex items-center justify-end gap-1.5">
     <span class="font-mono text-cp font-heavy tabular-nums text-cp-green-text">
       {{ usageBillingText(record) }}
+    </span>
+    <span v-if="record.userCharge" class="text-xs text-cp-primary-text" :title="`实际扣款 $${record.userCharge.chargedUsd}`">
+      计费 {{ Number(record.userCharge.multiplier) }}×
     </span>
 
     <UsageDetailPopover v-if="billing" title="计费明细" trigger-label="查看费用明细">

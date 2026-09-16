@@ -8,6 +8,9 @@ use gateway_api::admin::accounts::AccountQuotaForecastData;
 fn quota_forecast_projection_only_exposes_capacity_and_preserves_null_zero() {
     let now = "2026-09-12T00:00:00Z".parse().unwrap();
     let forecast = AccountQuotaForecast {
+        estimated_priced_usd: None,
+        remaining_priced_usd: None,
+        effective_pricing_multiplier: None,
         period: AccountUsagePeriod::Weekly,
         target_seconds: 7 * 86_400,
         extrapolated: false,

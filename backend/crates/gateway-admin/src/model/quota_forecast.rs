@@ -28,6 +28,9 @@ pub struct AccountQuotaForecast {
     pub incomplete_tokens: bool,
     pub estimated_tokens: Option<u64>,
     pub estimated_usd: Option<f64>,
+    pub estimated_priced_usd: Option<f64>,
+    pub remaining_priced_usd: Option<f64>,
+    pub effective_pricing_multiplier: Option<f64>,
     /// 剩余估算始终属于源窗口，不随目标周期折算。
     pub remaining_tokens: Option<u64>,
     pub remaining_usd: Option<f64>,
@@ -71,6 +74,9 @@ pub fn account_quota_forecasts(
             incomplete_tokens: false,
             estimated_tokens: None,
             estimated_usd: None,
+            estimated_priced_usd: None,
+            remaining_priced_usd: None,
+            effective_pricing_multiplier: None,
             remaining_tokens: None,
             remaining_usd: None,
         };
@@ -183,6 +189,14 @@ impl AccountQuotaForecast {
         let remaining_factor = (100.0 - percent) / sample.sampled_percent;
         self.remaining_tokens = tokens.and_then(|value| estimate_tokens(value, remaining_factor));
         self.remaining_usd = usd.and_then(|value| estimate(value, remaining_factor));
+        let priced_usd = usd.and(usage.priced_usd);
+        self.estimated_priced_usd = priced_usd.and_then(|value| estimate(value, factor));
+        self.remaining_priced_usd = priced_usd.and_then(|value| estimate(value, remaining_factor));
+        self.effective_pricing_multiplier = priced_usd.zip(usd).and_then(|(priced, raw)| {
+            (raw > 0.0)
+                .then_some(priced / raw)
+                .filter(|value| value.is_finite())
+        });
         self.unavailable_reason = if self.estimated_tokens.is_none() && self.estimated_usd.is_none()
         {
             Some("本周期暂无可用于估算的 Token 或费用数据，请积累用量后重试。")

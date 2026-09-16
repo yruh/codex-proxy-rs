@@ -48,6 +48,7 @@ pub(super) async fn load_history(
             known_cost_count: window_usage_count(row, "known_cost_count")?,
             unavailable_cost_count: window_usage_count(row, "unavailable_cost_count")?,
             usd: window_usage_value(row, "usd")?,
+            priced_usd: Some(window_usage_value(row, "priced_usd")?),
             excluded_request_count: window_usage_count(row, "excluded_request_count")?,
         };
         if window_usage_value::<bool>(row, "is_total")? {
@@ -74,7 +75,9 @@ fn history_sql() -> String {
     // 一个语句共享 MVCC 快照。用 RANGE 帧让相同完成时间的点拥有相同累计值，
     // 避免并发请求的任意行顺序制造不同分子；未完成请求只进入待决计数。
     format!(
-        "with coverage as (
+        "with pricing as (
+            select policy from portal_pricing_revisions order by id desc limit 1
+        ), coverage as (
             select min(l.occurred_at) as first_local_usage_at
               from local_usage_records l join usage_sync_devices d on d.id = l.device_id
              where d.provider_account_id = $1 and not l.excluded and l.occurred_at < $3
@@ -84,7 +87,7 @@ fn history_sql() -> String {
                    coalesce(({completed_usage}), false) as included,
                    mr.provider_observation_json is not null as has_document,
                    mr.input_tokens, mr.output_tokens, mr.cached_tokens, mr.total_tokens,
-                   mr.cost_amount, mr.cost_currency,
+                   mr.cost_amount, mr.cost_currency, mr.requested_model_id as pricing_model,
                    coalesce(mr.cost_source in ('calculated', 'provider_reported')
                      and mr.cost_amount is not null and mr.cost_currency = 'USD', false) as known_cost
               from model_requests mr
@@ -94,7 +97,7 @@ fn history_sql() -> String {
             select 'local:' || l.device_id || ':' || l.record_id,
                    l.occurred_at, l.occurred_at, true, not l.excluded, false,
                    l.input_tokens, l.output_tokens, l.cached_tokens,
-                   l.input_tokens + l.output_tokens, l.estimated_usd, 'USD',
+                   l.input_tokens + l.output_tokens, l.estimated_usd, 'USD', l.model,
                    l.estimated_usd is not null
               from local_usage_records l join usage_sync_devices d on d.id = l.device_id
              where d.provider_account_id = $1
@@ -112,6 +115,10 @@ fn history_sql() -> String {
                 (included and settled and known_cost)::integer as known_costs,
                 (included and settled and not known_cost)::integer as missing_costs,
                 case when included and settled and known_cost then cost_amount else 0 end as usd,
+                case when included and settled and known_cost then cost_amount *
+                    coalesce((select coalesce(policy->'modelMultipliers'->>pricing_model,
+                        policy->>'globalMultiplier') from pricing), '1')::numeric
+                    else 0 end as priced_usd,
                 (not included and settled)::integer as excluded
               from scoped
         ), cumulative as (
@@ -127,6 +134,7 @@ fn history_sql() -> String {
                 sum(known_costs) over w as known_cost_count,
                 sum(missing_costs) over w as unavailable_cost_count,
                 sum(usd) over w as usd,
+                sum(priced_usd) over w as priced_usd,
                 sum(excluded) over w as excluded_request_count
               from facts where settled
               window w as (order by completed_at range between unbounded preceding and current row)
@@ -138,7 +146,7 @@ fn history_sql() -> String {
             s.request_count::bigint, s.tokens::bigint, s.input_tokens::bigint,
             s.output_tokens::bigint, s.cached_tokens::bigint, s.missing_token_count::bigint,
             s.known_cost_count::bigint, s.unavailable_cost_count::bigint,
-            s.usd::double precision, s.excluded_request_count::bigint,
+            s.usd::double precision, s.priced_usd::double precision, s.excluded_request_count::bigint,
             0::bigint as pending_count, mr.provider_observation_json as document,
             null::timestamptz as first_local_usage_at
           from selected s join model_requests mr on mr.id = s.id
@@ -148,7 +156,7 @@ fn history_sql() -> String {
             coalesce(sum(inputs), 0)::bigint, coalesce(sum(outputs), 0)::bigint,
             coalesce(sum(cached), 0)::bigint, coalesce(sum(missing_tokens), 0)::bigint,
             coalesce(sum(known_costs), 0)::bigint, coalesce(sum(missing_costs), 0)::bigint,
-            coalesce(sum(usd), 0)::double precision, coalesce(sum(excluded), 0)::bigint,
+            coalesce(sum(usd), 0)::double precision, coalesce(sum(priced_usd), 0)::double precision, coalesce(sum(excluded), 0)::bigint,
             count(*) filter (where settled is not true), null::jsonb,
             (select first_local_usage_at from coverage)
           from facts

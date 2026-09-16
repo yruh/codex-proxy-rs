@@ -6,7 +6,7 @@ import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import { useAccountQuotaForecast } from '../../accounts/composables/useAccountQuotaForecast'
 
-const props = defineProps<{ account: Account }>()
+const props = defineProps<{ account: Account, pricingRevision?: number }>()
 const emit = defineEmits<{ accountUpdated: [account: Account] }>()
 const { report, loading, refreshing, error, load, refresh } = useAccountQuotaForecast(toRef(() => props.account.id), ref(true), account => emit('accountUpdated', account))
 const now = useNow({ interval: 30_000 })
@@ -20,6 +20,12 @@ const resetAt = computed(() => forecast.value?.source ? new Date(forecast.value.
 watch(() => props.account.quota.refreshedAtDisplay, () => {
   void load()
 })
+watch(() => props.pricingRevision, () => {
+  void load()
+})
+function usd(value: number | null | undefined) {
+  return value == null || !Number.isFinite(value) ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value)
+}
 </script>
 
 <template>
@@ -44,18 +50,42 @@ watch(() => props.account.quota.refreshedAtDisplay, () => {
       </div>
       <div>
         <p class="text-xs text-cp-text-tertiary">
-          预计整周容量 · USD
+          预计整周容量 · 原价 USD
         </p><p class="mt-2 break-all text-2xl font-bold tabular-nums">
           {{ valid ? forecast?.estimatedUsdDisplay || '—' : '—' }}
         </p>
       </div>
       <div>
         <p class="text-xs text-cp-text-tertiary">
-          预计剩余可用 · USD
+          预计剩余可用 · 原价 USD
         </p><p class="mt-2 break-all text-2xl font-bold tabular-nums text-cp-primary-text">
           {{ valid ? forecast?.remainingUsdDisplay || '—' : '—' }}
         </p>
       </div>
+    </div>
+    <div class="mt-4 rounded-cp bg-cp-fill-tertiary p-4">
+      <p class="text-sm font-semibold">
+        按当前计费倍率折算
+      </p>
+      <div class="mt-3 grid grid-cols-2 gap-4">
+        <div>
+          <p class="text-xs text-cp-text-tertiary">
+            预计整周 · USD
+          </p><p class="mt-1 text-xl font-bold tabular-nums">
+            {{ valid ? usd(forecast?.estimatedPricedUsd) : '—' }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-cp-text-tertiary">
+            预计剩余 · USD
+          </p><p class="mt-1 text-xl font-bold tabular-nums text-cp-primary-text">
+            {{ valid ? usd(forecast?.remainingPricedUsd) : '—' }}
+          </p>
+        </div>
+      </div>
+      <p class="mt-3 text-xs text-cp-text-tertiary">
+        逐模型折算，样本综合倍率 {{ valid && forecast?.effectivePricingMultiplier != null ? `${Number(forecast.effectivePricingMultiplier.toFixed(4))}×` : '—' }}。仅为容量估算，不是已扣款或充值余额。
+      </p>
     </div>
     <div v-if="remaining != null" class="mt-4 h-2 overflow-hidden rounded-full bg-cp-fill-tertiary" role="progressbar" :aria-label="`${account.name}周额度剩余比例`" :aria-valuenow="remaining" :aria-valuemin="0" :aria-valuemax="100">
       <div class="h-full rounded-full" :class="remaining <= 0 ? 'bg-cp-error' : 'bg-cp-primary'" :style="{ width: `${Math.max(0, Math.min(100, remaining))}%` }" />

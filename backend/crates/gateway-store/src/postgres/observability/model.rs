@@ -483,6 +483,7 @@ pub struct DashboardObservation {
 /// 使用记录列表所需的窄投影；完整执行、路由和客户端详情按 ID 单独读取。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageListRecord {
+    pub user_charge: Option<gateway_admin::model::observability::UserCharge>,
     pub portal_username: Option<String>,
     pub id: String,
     pub endpoint: String,
@@ -531,6 +532,7 @@ pub struct UsageListRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageRecord {
+    pub user_charge: Option<gateway_admin::model::observability::UserCharge>,
     pub id: String,
     pub client_api_key_ref: String,
     pub config_revision: u64,

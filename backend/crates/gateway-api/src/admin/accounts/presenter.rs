@@ -141,6 +141,9 @@ impl From<AccountQuotaForecastReport> for AccountQuotaForecastData {
 
 fn quota_forecast_view(forecast: AccountQuotaForecast) -> AccountQuotaForecastView {
     AccountQuotaForecastView {
+        estimated_priced_usd: forecast.estimated_priced_usd,
+        remaining_priced_usd: forecast.remaining_priced_usd,
+        effective_pricing_multiplier: forecast.effective_pricing_multiplier,
         period: match forecast.period {
             AccountUsagePeriod::Weekly => "weekly",
             AccountUsagePeriod::Monthly => "monthly",
