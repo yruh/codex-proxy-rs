@@ -43,7 +43,8 @@ pub async fn initialize(config: HostConfig) -> Result<HostBundle, HostError> {
     let log_guard = initialize_logging(&config.logging)?;
     let cancellation = CancellationToken::new();
     let connections = Arc::new(ConnectionTracker::new(cancellation.clone()));
-    let workers = WorkerSupervisor::new(cancellation.clone());
+    // HTTP drain 期间请求仍需写入终态和释放准入；后台任务只能在 drain 后取消。
+    let workers = WorkerSupervisor::new(CancellationToken::new());
     let system = Arc::new(ProcessSystemOperations::new(
         cancellation.clone(),
         config.system_update.clone(),

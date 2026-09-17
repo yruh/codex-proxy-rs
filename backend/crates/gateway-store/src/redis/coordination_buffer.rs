@@ -127,10 +127,17 @@ impl DaemonTask for ClientAdmissionReleaseWriter {
             let mut receiver = self.receiver.lock().await;
             loop {
                 let release = tokio::select! {
-                    () = cancellation.cancelled() => return Ok(()),
+                    () = cancellation.cancelled() => {
+                        // HTTP 已结束排空；停止接收新项，但完成队列里最后的准入释放。
+                        receiver.close();
+                        receiver.recv().await
+                    },
                     release = receiver.recv() => release,
                 };
                 let Some(release) = release else {
+                    if cancellation.is_cancelled() {
+                        return Ok(());
+                    }
                     return Err(WorkerTaskError::safe(
                         "client admission release queue closed",
                     ));

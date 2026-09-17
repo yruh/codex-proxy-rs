@@ -189,6 +189,40 @@ async fn redis_coordination_writers_should_flush_each_side_effect() {
     assert_eq!(operations, ["admission", "circuit_success"]);
 }
 
+#[tokio::test]
+async fn admission_writer_cancellation_should_flush_all_queued_releases() {
+    let inner = Arc::new(RecordingCoordination::default());
+    let (admissions, writer) = BufferedClientAdmissionPort::new(inner.clone());
+    let client = ClientApiKeyId::new("key_shutdown_test").expect("client key");
+    for index in 0..8 {
+        let request = ModelRequestId::new(format!("req_shutdown_{index}")).expect("request ID");
+        assert!(
+            admissions
+                .release(&client, &request)
+                .await
+                .expect("enqueue")
+        );
+    }
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        spawn_writer(Arc::new(writer), cancellation),
+    )
+    .await
+    .expect("shutdown drains within deadline")
+    .expect("writer joins")
+    .expect("writer shuts down cleanly");
+    assert_eq!(inner.operations(), vec!["admission"; 8]);
+    let request = ModelRequestId::new("req_after_shutdown").expect("request ID");
+    assert!(
+        !admissions
+            .release(&client, &request)
+            .await
+            .expect("closed queue")
+    );
+}
+
 fn spawn_writer<T>(
     writer: Arc<T>,
     cancellation: CancellationToken,

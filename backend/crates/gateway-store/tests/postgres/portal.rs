@@ -12,6 +12,91 @@ use gateway_store::postgres::PgPortalStore;
 struct AllowAdmission;
 
 #[tokio::test]
+async fn portal_release_should_persist_when_redis_release_writer_is_stopped() {
+    use gateway_admin::model::portal::{PortalKey, WalletPolicy};
+    use gateway_store::postgres::PgPortalAdmission;
+    use gateway_store::redis::BufferedClientAdmissionPort;
+    use std::{sync::Arc, time::Duration as StdDuration};
+
+    let Some(database) = TestDatabase::create("portal_release_shutdown").await else {
+        return;
+    };
+    let store = PgPortalStore::new(database.pool.clone());
+    let user = PortalUser {
+        id: "shutdown_student".into(),
+        username: "shutdown_student".into(),
+        enabled: true,
+        session_version: 1,
+    };
+    store
+        .create_user(PortalCredential {
+            user: user.clone(),
+            password_hash: "hash".into(),
+        })
+        .await
+        .unwrap();
+    let key = PortalKey {
+        id: "shutdown_key".into(),
+        name: "Shutdown test".into(),
+        key: "sk_shutdown_test".into(),
+        enabled: true,
+    };
+    store.create_own_key(&user, &key).await.unwrap();
+    store
+        .credit_wallet(&user.id, "credit", "10", "test")
+        .await
+        .unwrap();
+    store
+        .set_wallet_policy(
+            &user.id,
+            WalletPolicy {
+                daily_limit_usd: "0".into(),
+                weekly_limit_usd: "0".into(),
+                max_concurrency: 1,
+            },
+        )
+        .await
+        .unwrap();
+    let (redis, writer) = BufferedClientAdmissionPort::new(Arc::new(AllowAdmission));
+    let admission = PgPortalAdmission::new(database.pool.clone(), Arc::new(redis));
+    let request = |id: &str| ClientAdmissionRequest {
+        model_request_id: ModelRequestId::new(id).unwrap(),
+        client_api_key_id: ClientApiKeyId::new(key.id.clone()).unwrap(),
+        lease_ttl: StdDuration::from_secs(600),
+        allow_concurrency_acquire: true,
+        limits: Default::default(),
+    };
+    let first = request("req_before_shutdown");
+    let next = request("req_after_shutdown");
+    assert_eq!(
+        admission.admit(first.clone()).await.unwrap(),
+        ClientAdmissionDecision::Granted
+    );
+    assert_eq!(
+        admission.admit(next.clone()).await.unwrap(),
+        ClientAdmissionDecision::Rejected(ClientAdmissionRejection::ConcurrencyLimited)
+    );
+    // 模拟释放队列已关闭；PG 用户槽位仍需立即释放，不等待十分钟 TTL。
+    drop(writer);
+    admission
+        .release(&first.client_api_key_id, &first.model_request_id)
+        .await
+        .unwrap();
+    let released: bool =
+        sqlx::query_scalar("select released from portal_user_requests where request_id=$1")
+            .bind(first.model_request_id.as_str())
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert!(released);
+    assert_eq!(
+        admission.admit(next).await.unwrap(),
+        ClientAdmissionDecision::Granted
+    );
+    database.close().await;
+}
+
+#[tokio::test]
 async fn portal_deletion_revokes_access_and_preserves_history() {
     use gateway_admin::model::portal::PortalKey;
     let Some(database) = TestDatabase::create("portal_deletion").await else {

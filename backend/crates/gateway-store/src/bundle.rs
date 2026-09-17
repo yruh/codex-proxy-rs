@@ -151,9 +151,10 @@ pub async fn initialize(mut config: StoreConfig) -> StoreResult<StoreBundle> {
             redis_connection.clone(),
             REDIS_NAMESPACE,
         )?);
-    let (admissions, admission_release_writer) = redis::BufferedClientAdmissionPort::new(Arc::new(
-        postgres::PgPortalAdmission::new(pool.clone(), admissions),
-    ));
+    let (admissions, admission_release_writer) =
+        redis::BufferedClientAdmissionPort::new(admissions);
+    // 用户共享并发必须在请求结束前持久释放，不能进入 Redis 的可丢失副作用队列。
+    let admissions = postgres::PgPortalAdmission::new(pool.clone(), Arc::new(admissions));
     let (circuits, circuit_feedback_writer) = redis::BufferedProviderCircuitPort::new(circuits);
     let core_ports = CoreStorePorts::new(
         execution,

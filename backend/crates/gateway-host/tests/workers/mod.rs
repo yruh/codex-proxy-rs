@@ -606,6 +606,50 @@ async fn cooperative_shutdown_propagates_cancel_before_dropping_all_guards() {
 }
 
 #[tokio::test]
+async fn host_should_keep_workers_alive_until_http_drain_finishes() {
+    let config = serde_json::from_value(serde_json::json!({
+        "listen": { "host": "127.0.0.1", "port": 0 },
+        "runtime_data_dir": "unused-test-runtime",
+        "logging": {
+            "level": "error", "stdout": true,
+            "file": { "enabled": false, "directory": "unused-test-logs" }
+        },
+        "drain_timeout_seconds": 5,
+        "worker_shutdown_timeout_seconds": 5
+    }))
+    .expect("host config");
+    let host = gateway_host::initialize(config)
+        .await
+        .expect("initialize host");
+    let task = CancellationTask {
+        entered: Arc::new(AtomicUsize::new(0)),
+        observed: Arc::new(AtomicUsize::new(0)),
+    };
+    host.start_workers(
+        all_active_plan(task.clone()),
+        Arc::new(FakeLeasePort::default()),
+    )
+    .expect("start workers");
+    wait_until(|| task.entered.load(Ordering::SeqCst) == ACTIVE_KINDS.len()).await;
+    let connections = host.connection_lifecycle();
+    let active = connections.try_register().expect("active connection");
+    host.cancellation().cancel();
+    let serving = tokio::spawn(host.serve(axum::Router::new()));
+    wait_until(|| connections.is_draining()).await;
+    // 保持连接未结束，让 worker 有机会观察错误地共享的取消信号。
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(task.observed.load(Ordering::SeqCst), 0);
+    assert!(!serving.is_finished());
+    drop(active);
+    tokio::time::timeout(Duration::from_secs(2), serving)
+        .await
+        .expect("host finishes after drain")
+        .expect("host joins")
+        .expect("host serves");
+    assert_eq!(task.observed.load(Ordering::SeqCst), ACTIVE_KINDS.len());
+}
+
+#[tokio::test]
 async fn shutdown_timeout_aborts_uncooperative_task_and_drops_guard() {
     let task = HungTask {
         entered: Arc::new(AtomicBool::new(false)),
