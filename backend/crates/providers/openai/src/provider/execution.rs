@@ -124,9 +124,13 @@ impl CodexProvider {
             crate::transport::request::scope_turn_metadata(metadata, lease.installation_id(), true)
         });
         let events = cold_json_response_stream(ColdJsonResponse {
-            client: self.client.for_account(lease.account()).map_err(|_| {
-                provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
-            })?,
+            client: self
+                .client
+                .for_account(lease.account())
+                .map_err(|_| {
+                    provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+                })?
+                .with_authentication(lease.authentication()),
             response_origin: request.response_origin,
             endpoint_path: request.endpoint_path,
             body: request.body,
@@ -403,6 +407,7 @@ pub(super) fn cold_json_response_stream(request: ColdJsonResponse) -> EventStrea
             response_origin: &request.response_origin,
             cyber_policy_scope: None,
             allows_account_state_mutation,
+            allows_capacity_feedback: !request.context.is_diagnostic_required_account(),
         };
         let active_account = request.lease.account().clone();
         let cookie_header = build_cookie_header(request.lease.cookies())?;
@@ -577,6 +582,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             response_origin: &response_origin,
             cyber_policy_scope: cyber_policy_scope.as_ref(),
             allows_account_state_mutation,
+            allows_capacity_feedback: !context.is_diagnostic_required_account(),
         };
         let mut active_account = lease.account().clone();
         let cookie_header = build_cookie_header(lease.cookies())?;

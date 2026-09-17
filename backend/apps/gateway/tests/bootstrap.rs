@@ -272,16 +272,107 @@ fn bootstrap_config_debug_should_redact_all_passwords() {
 }
 
 #[test]
-fn config_loader_should_reject_unknown_fields() {
-    assert_rejected(format!(
-        "{}\nunknown_terminal_field: true\n",
-        valid_config()
-    ));
+fn config_loader_should_ignore_unknown_fields_in_configuration_sections() {
+    let mut document = valid_config_document();
+    document["host"]["system_update"] = serde_json::json!({});
+    document["store"]["pool"] = serde_json::json!({});
+    for path in [
+        "",
+        "/host",
+        "/host/listen",
+        "/host/logging",
+        "/host/logging/file",
+        "/host/system_update",
+        "/store",
+        "/store/database",
+        "/store/redis",
+        "/store/pool",
+        "/admin",
+        "/client",
+        "/api",
+        "/openai",
+        "/openai/wire_profile",
+        "/xai",
+        "/xai/wire_profile",
+    ] {
+        let mut extended = document.clone();
+        extended.pointer_mut(path).expect("configuration section")["unused_setting"] =
+            serde_json::json!({"nested": [true, null, "ignored"]});
+        parse_config(&extended.to_string())
+            .unwrap_or_else(|error| panic!("unknown field in {path}: {error}"));
+    }
 }
 
 #[test]
-fn config_loader_should_reject_removed_tls_section() {
-    assert_rejected(valid_config().replace("openai:\n", "openai:\n  tls: {}\n"));
+fn config_loader_should_ignore_removed_tls_and_fingerprint_sections() {
+    let mut document = valid_config_document();
+    document["openai"]["tls"] = serde_json::json!({});
+    document["openai"]["fingerprint"] = serde_json::json!({"browser": "removed"});
+    parse_config(&document.to_string()).expect("removed provider settings are ignored");
+}
+
+#[test]
+fn config_loader_should_reject_invalid_known_fields_alongside_unknown_fields() {
+    for port in [serde_json::json!(0), serde_json::json!("not-a-port")] {
+        let mut document = valid_config_document();
+        document["host"]["listen"]["unused_setting"] = serde_json::json!(true);
+        document["host"]["listen"]["port"] = port;
+        assert_rejected(document.to_string());
+    }
+}
+
+#[test]
+fn config_loader_should_report_startup_configuration_diagnostics() {
+    const CHILD_ENV: &str = "CPR_TEST_CONFIG_DIAGNOSTICS_CHILD";
+    const UNUSED_SECRET: &str = "unused-value-must-not-appear-in-diagnostics";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        gateway_host::load_config::<GatewayConfig>().expect("startup configuration");
+        return;
+    }
+    for case in ["normal", "unused", "missing"] {
+        let mut document = valid_config_document();
+        if case == "unused" {
+            document["openai"]["wire_profile"]["location"] = serde_json::json!(UNUSED_SECRET);
+        } else if case == "missing" {
+            document["host"]["listen"]
+                .as_object_mut()
+                .unwrap()
+                .remove("port");
+        }
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("deploy")).unwrap();
+        fs::write(
+            directory.path().join("deploy/config.yaml"),
+            document.to_string(),
+        )
+        .unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "bootstrap::config_loader_should_report_startup_configuration_diagnostics",
+                "--nocapture",
+            ])
+            .env(CHILD_ENV, "1")
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.success(),
+            case != "missing",
+            "{case}: {stderr}"
+        );
+        match case {
+            "unused" => assert!(
+                stderr.contains("openai.wire_profile.location") && stderr.contains("已忽略"),
+                "{stderr}"
+            ),
+            "missing" => assert!(stderr.contains("host.listen.port"), "{stderr}"),
+            _ => assert!(!stderr.contains("警告"), "{stderr}"),
+        }
+        assert!(!stderr.contains(UNUSED_SECRET), "{stderr}");
+        assert!(!stderr.contains("services"), "{stderr}");
+    }
 }
 
 #[test]
@@ -354,14 +445,6 @@ fn config_loader_should_reject_missing_client_session_ttl() {
 }
 
 #[test]
-fn config_loader_should_reject_removed_fingerprint_section() {
-    assert_rejected(valid_config().replace(
-        "openai:\n",
-        "openai:\n  fingerprint:\n    browser: removed\n",
-    ));
-}
-
-#[test]
 fn config_loader_should_reject_invalid_codex_cli_version() {
     assert_rejected(valid_config().replace("codex_version: '0.153.4'", "codex_version: 'latest'"));
 }
@@ -386,36 +469,22 @@ fn config_loader_should_reject_invalid_desktop_profile_fields() {
 }
 
 #[test]
-fn config_loader_should_accept_empty_and_custom_request_locations() {
+fn config_loader_should_ignore_removed_request_location_setting() {
     let original = valid_config();
-    let omitted = original
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("location:"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_ne!(original, omitted);
-    parse_config(&omitted).expect("location passthrough when omitted");
-    let location_line = original
-        .lines()
-        .find(|line| line.trim_start().starts_with("location:"))
-        .expect("example location");
-    for empty in ["    location:", "    location: null", "    location: ~"] {
-        parse_config(&original.replace(location_line, empty)).expect("empty YAML location");
+    parse_config(&original).expect("location belongs to runtime settings");
+    for value in [
+        "null",
+        "{}",
+        "{ country: 'US', region: 'Ohio', city: 'Piketon', timezone: 'America/New_York' }",
+    ] {
+        let legacy = original.replacen(
+            "    residency: us",
+            &format!("    residency: us\n    location: {value}"),
+            1,
+        );
+        assert_ne!(legacy, original);
+        parse_config(&legacy).expect("removed request location does not prevent startup");
     }
-    let custom = original.replace(
-        "location: { country: 'US', region: 'Ohio', city: 'Piketon', timezone: 'America/New_York' }",
-        "location: { country: 'NZ', region: 'Auckland', city: 'Auckland', timezone: 'Pacific/Auckland' }",
-    );
-    assert_ne!(original, custom);
-    parse_config(&custom).expect("custom location from YAML");
-}
-
-#[test]
-fn config_loader_should_reject_invalid_request_location_timezones() {
-    let original = valid_config();
-    let invalid = original.replace("timezone: 'America/New_York'", "timezone: 'Not/A_Timezone'");
-    assert_ne!(original, invalid);
-    assert_rejected(invalid);
 }
 
 fn assert_rejected(config: String) {

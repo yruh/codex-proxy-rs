@@ -1,5 +1,6 @@
 //! OpenAI 额度事实边界与展示快照回归。
 
+mod capacity_freeze;
 mod recovery;
 mod refresh_timing;
 mod scheduling;
@@ -38,7 +39,6 @@ fn wire_profile() -> CodexWireProfileState {
         arch: "x86_64".to_owned(),
         terminal: "quota-contract".to_owned(),
         residency: None,
-        location: Default::default(),
         verified_at: Utc
             .with_ymd_and_hms(2026, 7, 18, 0, 0, 0)
             .single()
@@ -68,6 +68,8 @@ fn quota_service_with_base_url(
         http,
         base_url,
         Arc::new(crate::support::MemoryCooldownPort::new()),
+        Arc::new(crate::support::TestLeaseCoordinator::default()),
+        crate::support::runtime_policy(),
     )
 }
 

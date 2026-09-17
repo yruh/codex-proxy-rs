@@ -157,7 +157,7 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 `deflate`（zlib 封装）和 `zstd`，缺省、空值或 `identity` 直接使用原始正文。gzip 多成员与 zstd
 多帧连续解码，整体展开结果最多 64 MiB，超限在继续展开前返回 `400 request_too_large`；zstd
 回溯窗口同样最多 64 MiB，不能满足该限制的帧按解码失败处理。这个限制保护入站解压资源，不是
-模型上下文或 Token 上限，也不新增未压缩正文的长度限制。
+模型上下文或 Token 上限；未压缩正文不受此长度限制。
 不支持的编码、逗号分隔的叠加编码和重复 `Content-Encoding` 头返回
 `400 unsupported_content_encoding`；压缩正文损坏、截断或解压后不是合法 JSON 返回
 `400 invalid_json`。本地错误不包含原始正文或解压库细节。WebSocket 文本帧不经过这条解压路径。
@@ -166,26 +166,27 @@ Responses 不透传下游的逐跳头、反代元数据（如 `cf-*`、`x-forwar
 `cdn-loop`）以及 `Accept-Encoding` / `Content-Encoding`。链路元数据和编解码能力
 由各段传输层独立管理；其余业务扩展头继续透传，不使用固定业务头白名单。
 此规则同时适用于上游 HTTP 和 WebSocket，不影响上游响应的 `cf-ray` 等诊断信息。
-API Key 上游还会移除 Cookie、ChatGPT 账号身份、`x-codex-*`、`x-openai-internal-*`、会话/线程身份头及
-`X-OpenAI-Actor-Authorization`，避免把 OAuth 或网关托管身份传给第三方 API。
+API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`version`）和业务头透传规则，
+包括会话、线程、Lite 和其他业务扩展头。
+上游认证只来自选中的账号；API Key 不携带 OAuth Cookie、ChatGPT 账号身份或下游的
+`X-OpenAI-Actor-Authorization` 托管认证声明。
 
 Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和 `sec-fetch-*`
-携带的下游 SDK/浏览器环境或页面来源。兼容基准是 Codex Core/Desktop 请求协议；
-OpenAI 官方 SDK 也会发送 `x-stainless-*`，浏览器字段也有标准定义，过滤不表示这些头非法。
-规则不依赖下游 User-Agent，也不改变原始入站请求供 CORS、鉴权和本地观测使用的字段。
-`session_id` 请求头仅作为入站会话别名，提取后不再原样透传，上游通过 `session-id` 表达；
+携带的下游 SDK/浏览器环境或页面来源。过滤规则适用于所有下游客户端，与 User-Agent 无关；
+原始入站头仍供 CORS、鉴权和本地观测使用。
+`session_id` 请求头仅作为入站会话别名，上游通过 `session-id` 表达；
 两者同时存在时仍优先使用 `session-id`。正文中的 `client_metadata.session_id`、
 `prompt_cache_key` 不受这条请求头规则影响。
-`thread-id`、turn metadata 等 Codex 协议字段及未知业务扩展继续按既有合同处理；
+`thread-id`、turn metadata 等 Codex 协议字段及未知业务扩展不受下游环境头过滤规则影响；
 `traceparent`、`tracestate` 不因属于追踪字段而被删除。
 
 Responses 上游编码会移除 Codex 不接受的顶层 `temperature`、`max_output_tokens` 和
-`prompt_cache_retention`；这些参数可能来自 Pi 等客户端的普通 OpenAI Responses 适配。
+`prompt_cache_retention`。
 `prompt_cache_key`、`reasoning`、`include` 等 Codex 参数继续保留。过滤只作用于顶层，
 不删除工具参数 schema、输入内容或 `client_metadata` 内的同名业务字段；其他未知字段继续透传。
 
-这不是客户端匿名化：系统提示词、工具定义、工具结果、工作目录及其他业务 metadata 仍可能
-透露客户端环境，网关不对正文做客户端品牌清洗。
+请求头过滤不提供客户端匿名化；系统提示词、工具定义、工具结果、工作目录及其他业务 metadata
+保持原有语义，可能包含客户端环境信息。
 
 Responses WebSocket 仅接受文本 `response.create`，同一连接串行执行。当前响应期间收到的后续业务帧
 留在有界接收队列中，待当前响应完成终结和写出后再逐条校验、准入与执行，不因请求提前到达而断开。
@@ -196,7 +197,7 @@ OAuth 账号在客户端使用 HTTP/SSE 时仍可能选择上游 WebSocket。API
 客户端配置的 `supports_websockets` 只控制第一段连接，不是服务端传输策略开关。
 上游在响应终态前发送 Close 1000 仍属于失败，不能按“正常关闭”计为成功。
 
-已建立模型执行的 Responses、Images 和 Search HTTP 响应使用现有 ID：
+已建立模型执行的 Responses、Images 和 Search HTTP 响应按以下规则返回关联 ID：
 `x-gateway-request-id` 为模型执行 ID；`x-request-id` 保留有效上游值，只有上游
 `x-oai-request-id` 时复用其值，没有上游 ID 时使用模型执行 ID。`x-oai-request-id` 不是必需字段，
 也不要求客户端识别它；OpenAI 与 xAI 路由使用相同规则。失败响应的关联 ID 不采用会话 opening ID，
@@ -253,9 +254,12 @@ Responses wire 之间的协议转换层，转换只在 xAI Provider 内完成。
 OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足错误时，代理在允许安全重放且
 尚未交付输出的前提下，先做最多 3 次同账号指数退避，再通过现有调度换号。默认间隔从 500ms 开始，
 上游 `Retry-After` 参与退避计算，单次等待不超过 8 秒；重试同时受请求总尝试次数和截止时间约束。
-容量不足不扣 Smart 账号健康分，不触发 Provider 全局熔断，也不作为账号额度耗尽写入冷却状态。
+`server_is_overloaded`、`slow_down` 等可计分的结构化错误按已发送的失败尝试计入 Smart 账号
+健康分。失败率使用账号级平滑与时间衰减，影响后续普通选路，已有可用账号的
+会话亲和仍优先。容量不足不触发 Provider 全局熔断，也不作为账号额度耗尽；启用账号自动冻结时，
+达到容量失败阈值会另外写入临时冷却。
 最终交付的上游错误仍按上述透明边界保留原始状态码、错误码和正文。
-明确额度耗尽继续走现有账号隔离与安全换号流程，
+明确额度耗尽触发账号隔离与安全换号，
 包括 WebSocket 握手返回的 429；不会因其长 `Retry-After` 而转入同账号传输恢复等待。
 
 ## 4. 浏览器认证
@@ -277,14 +281,12 @@ OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足�
 未登录时为 `{ authenticated: false, session: null }`。`role` 由服务端已验证身份推导，不接受客户端声明。
 不返回凭据或绑定 ID。
 
-Redis 统一保存身份（管理员 ID 或 Client Key ID）和绝对有效期，不保存密码或原始 Key。
-使用 `auth:v1` 命名空间，Cookie 属性为 `Path=/; HttpOnly; SameSite=Lax`，`Max-Age` /
+会话由服务端保存，Cookie 属性为 `Path=/; HttpOnly; SameSite=Lax`，`Max-Age` /
 `Expires` 对齐固定有效期，`Secure` 沿用上述 Origin 规则。轮询不会续期。
 管理员有效期由 `admin.session_ttl_minutes` 控制；密钥有效期由 `client.session_ttl_minutes` 控制，默认 1440 分钟。
 
 每次恢复密钥会话时重新确认 Key 存在且启用；停用或删除后会话失效，重新启用不会恢复已撤销会话。
 依赖不可用时返回 503，不返回已认证或假装未登录。预算耗尽不妨碍登录。
-原有管理员认证路由和 Cookie 不再接受，升级后需要重新登录。
 
 密钥会话访问管理接口返回 403，不清除仍然有效的会话。
 浏览器会话不能替代 `/v1/*` 的 Bearer Key，数据面 Key 也不能替代浏览器会话。
@@ -367,6 +369,11 @@ Token 明细、费用明细、用时/首字与状态。Token 和费用复用现�
 - `sortBy`: `email`、`status`、`planType`、`usage`、`lastUsedAt`、`expiresAt`；
 - `sortDirection`: `asc`、`desc`。
 
+账号限流详情在 `quota` 中返回：`rateLimitReason` 为 `upstream_rate_limit`（上游临时限流）、
+`capacity_freeze`（容量错误触发自动冻结）或 `null`。`recoveryProbeRequired` 表示解除冻结是否需要成功探测；
+此时 `rateLimitedUntil` 是最早探测时间，到期后仍保持 `rate_limited`，直到探测成功或手动恢复。
+未要求探测时，该字段表示冷却结束时间。所有此类情况统一显示“限流中”，仅详情原因和恢复条件不同。
+
 账号列表和详情返回 `notes`（无备注时为 `null`）。编辑时省略或 `null` 保留原备注；字符串最多 500 个 Unicode
 字符，允许换行和制表符，保存时去除首尾空白，空字符串清空备注。备注独立于上游身份，导入时未显式提供备注、
 重新授权、凭据刷新及批量调度更新均保留已有备注。
@@ -420,12 +427,12 @@ Images、独立 Search 及管理员连接测试不受该文本模型限制；连
 | `GET` | `/api/admin/proxies` | `page`、`pageSize`（1-200）、`search`（名称） | `{ items, page }` |
 | `GET` | `/api/admin/proxies/accounts` | `proxyId`、`page`、`pageSize`（1-200）、`search`（账号名称或邮箱） | `{ items, page }` |
 | `POST` | `/api/admin/proxies/accounts/remove` | `{ proxyId, accountId }` | `{ configRevision }` |
-| `POST` | `/api/admin/proxies/create` | `{ name, proxyUrl }` | `201 { record, configRevision }` |
-| `POST` | `/api/admin/proxies/update` | `{ id, revision, name, proxyUrl? }` | `{ record, configRevision }` |
+| `POST` | `/api/admin/proxies/create` | `{ name, proxyUrl, location? }` | `201 { record, configRevision }` |
+| `POST` | `/api/admin/proxies/update` | `{ id, revision, name, proxyUrl?, location? }` | `{ record, configRevision }` |
 | `POST` | `/api/admin/proxies/test` | `{ id, revision }` | 最新代理记录 / Proxy record with test result |
 | `POST` | `/api/admin/proxies/delete` | `{ id, revision }` | `{ configRevision }` |
 
-`record` 包含 `id`、`name`、`endpoint`、`hasAuthentication`、`revision`、`accountCount`、
+`record` 包含 `id`、`name`、`endpoint`、`hasAuthentication`、`revision`、`accountCount`、`location`、
 `lastTestAt`、`lastTest: { success, latencyMs, exitIp, message }`、`createdAt`、`updatedAt`。
 未测试时 `lastTestAt` / `lastTest` 为 `null`。连通性失败返回 HTTP 200 和 `lastTest.success=false`；
 记录版本过期、重复 URL、删除已绑定的代理返回 409，并发测试满载返回 429。
@@ -440,6 +447,17 @@ Images、独立 Search 及管理员连接测试不受该文本模型限制；连
 
 更新省略 `proxyUrl` 保留认证；连接配置改变时清除测试结果并更新所有绑定账号。
 测试结果只在请求中的版本仍匹配时保存。
+
+`location` 为 `null` 或完整对象 `{ country, region, city, timezone }`。国家代码为两位大写 ASCII 字母；
+地区、城市禁止控制字符，去除首尾空白后须为 1–128 个字符；时区必须是有效 IANA 名称，例如 `Asia/Tokyo`。
+创建时省略或 `null` 表示继承全局；更新时省略表示保留，`null` 清除覆盖，完整对象替换覆盖。
+只改位置不清空连通性测试结果，也不更改账号凭据版本。
+
+关联账号的 OpenAI/Codex Responses 请求（HTTP/SSE、WebSocket）优先使用代理位置，否则使用全局
+运行设置中已开启的 `requestLocation`；两者均未开启时保留客户端原有位置和时区。全局覆盖按请求冻结，
+新请求使用保存后的设置，无需重启；代理覆盖在每次执行时读取，
+换号或换出口按该次选定账号解析。位置只影响带来源标记的环境上下文日期/时区和 Web Search 的结构化位置，
+不改变用户普通文本、epoch 时间戳、真实出口 IP、服务或管理端时区、数据驻留约束及 xAI 请求。
 
 测试固定经代理访问双栈端点 `https://api64.ipify.org?format=json`，返回本次连接实际使用的 IPv4 或 IPv6 出口地址，
 不分别验证两种地址族的连通性。超时 15 秒，每进程最多同时测试 4 条。
@@ -483,8 +501,8 @@ OAuth 等待回调期间不持有保护；提交仍拒绝已删除、连接配�
 管理端通过后台任务导入账号，关闭页面不会取消执行。`submissionId` 为客户端生成的 UUID；同一管理员在任务记录
 保留期间使用相同标识和相同输入重新提交，会返回已有任务，内容改变则返回 409。修改输入须使用新标识。
 
-每个任务接受 1–200 个 `items`，请求体上限为 4 MiB。每个条目沿用下节的 Provider 文档与设置合同，独立调用
-凭据准备、校验、事务提交与快照发布流程。批量 AT / RT 由前端按非空输入顺序拆成单账号条目，因此可逐条统计；
+每个任务接受 1–200 个 `items`，请求体上限为 4 MiB。每个条目遵循下节的 Provider 文档与设置合同，独立处理
+并返回结果。批量 AT / RT 按非空输入顺序拆成单账号条目，因此可逐条统计；
 JSON 文件按 Provider 文档分项，不拆解内部代理引用或改变 Provider 对文档的原子性与部分成功语义。
 一个文档可导入多个账号，条目成功数与入库账号数可能不同。
 
@@ -494,10 +512,10 @@ JSON 文件按 Provider 文档分项，不拆解内部代理引用或改变 Prov
 列表返回 `{ items: [摘要] }`。结果未知时保留 `unknown`，先核对账号目录再决定是否重新导入；服务端不自动重试凭据交换。
 停止请求可重复调用，已结束的任务保持原结果；未知、已过期或其他管理员的任务 ID 返回 404。
 
-任务仅保存在单实例进程内，不新增数据库表，也不使用 Redis 保存任务。所有后台导入共享 3 个执行槽位；
+所有后台导入共享 3 个执行槽位；
 最多接受 8 个未结束任务、保留 100 个任务，达到上限返回 429。成功、失败或跳过后立即释放对应输入，
 终态结果保留 1 小时后自动清理。服务重启会丢失任务与未执行输入，已提交的账号不受影响；
-重新打开页面从服务端恢复当前管理员的任务列表，前端不持久化任务 ID 或凭据。
+任务记录仍在保留期内时，可通过列表接口查询当前管理员的任务及进度。
 
 ### 账号导入与 OAuth
 
@@ -531,18 +549,21 @@ API Key 账号使用以下独立凭据形态：
 }
 ```
 
-`base_url` 是 API 前缀，追加 `responses` 和 `models`，不会自动补 `/v1`；支持根路径和自定义前缀。
+`base_url` 是 API 前缀，追加 `responses`、`models`、`images/generations`、`images/edits` 或 `alpha/search`，
+不会自动补 `/v1`；支持根路径和自定义前缀。
 地址仅允许 HTTPS，HTTP 只允许本机回环；拒绝 URL 中的认证信息、查询串和 fragment。
 `transport` 可省略（默认 `http`）或设为 `prefer_websocket`。API Key 使用 Bearer 认证与普通 JSON，
-不携带 OAuth Cookie 或 ChatGPT 身份。上游须提供标准 `/models` 列表，模型目录按账号和凭据版本隔离。
+不携带 OAuth Cookie 或 ChatGPT 身份。上游模型列表使用标准 `/models` 格式，按账号和凭据版本隔离；
+目录用于模型发现，不作为能力白名单，未列出的模型仍交由上游判断。
 API Key 每次导入创建独立账号；更新已有账号使用 `rotate`。导出会显式包含密钥，沿用敏感导出的确认合同。
 
 sub2api 的 `platform=openai`、`type=apikey` 使用 `credentials.base_url` / `credentials.api_key`；
 导入时按其端点规则将服务根、版本前缀或完整 `/responses` 地址转换为 API 前缀，缺省地址为官方 `/v1`。
 非空模型映射、请求头覆盖、其他协议和启用的 `extra.openai_*` 设置尚未适配，返回输入错误，需先移除并在本项目重新配置。
 
-API Key 账号支持 Responses、模型目录、连接测试和使用统计中的本地用量。OAuth 刷新/重新授权、ChatGPT 额度、个人资料、订阅、重置卡
-及 Images、standalone Search、Responses Lite / compact 专用入口不对这类账号开放。
+API Key 账号与 OAuth 共用现有 Responses、Images 和 standalone Search 请求与响应链路，
+包括 Responses Lite 和原生压缩协议的透传，实际支持情况由上游决定；不提供独立 compact 路由。
+模型目录、连接测试和本地用量统计可用；OAuth 刷新/重新授权、ChatGPT 额度、个人资料、订阅和重置卡不适用。
 客户端的 `image_generation` 和 `X-OpenAI-Actor-Authorization` 声明不改变账号的实际能力。
 账号列表和详情的 API Key `usage` 汇总该账号创建后仍保留的本地请求记录，`windowLabelDisplay` 为 `通用额度`；
 日志清理会影响累计范围，不代表上游余额。OAuth 账号仍按实际周/月额度窗口统计。
@@ -896,6 +917,8 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 设置更新字段包括：
 
 ```text
+requestLocationEnabled
+requestLocation
 modelMappings
 refreshMarginSeconds
 refreshConcurrency
@@ -910,7 +933,22 @@ minCodexCliVersion
 usageRetentionDays
 opsEventRetentionDays
 auditRetentionDays
+accountAutoFreezeEnabled
+accountAutoFreezeThreshold
+accountAutoFreezeWindowSeconds
+accountAutoFreezeDurationSeconds
+accountAutoFreezeProbeEnabled
+accountAutoFreezeProbeModel
+accountAutoFreezeAdaptiveConcurrency
 ```
+
+`requestLocationEnabled` 是必填布尔值，默认 `false`：关闭时不覆盖客户端原有位置和时区；开启时使用已保存的
+`requestLocation`。关闭不会清空自定义值，代理自定义位置仍优先。
+`requestLocation` 是必填的完整对象 `{ country, region, city, timezone }`，不接受 `null`；初始保存值为
+`{ country: "US", region: "Ohio", city: "Piketon", timezone: "America/New_York" }`。
+字段约束与[代理位置](#独立代理管理--managed-proxies)一致。全局自定义开启后，OpenAI Responses 使用全局位置，
+关联代理配置了自定义位置时优先使用代理值。保存后通过现有配置发布机制对新请求生效，
+已开始请求及其重试保持同一份全局值；普通文本、绝对时间戳和数据驻留要求不受影响。
 
 `maxWaitingPerKey` 与 `maxWaitingPerAccount` 是全局统一的排队容量，取值 0～1,000，默认 0（关闭）；
 每个 Key、每个账号各自独立计数，没有单对象覆盖字段。执行并发为 5、最大排队数为 5 时，
@@ -921,6 +959,17 @@ auditRetentionDays
 
 `rotationStrategy` 可取 `smart`、`quota_reset_priority`、`round_robin`、`sticky`。
 两个 `minCodex*Version` 字段为 `string | null`，只设置最低版本，不存在最大版本字段。
+
+账号自动冻结（`accountAutoFreezeEnabled`）默认关闭。启用后，在统计窗口内按尝试累计容量类上游错误（`server_is_overloaded`
+等与 5xx 不可用），达到阈值后把该账号冻结为带恢复倒计时的 `rate_limited` 状态。`accountAutoFreezeThreshold`
+取值 2～1,000（默认 12，按普通请求的 attempt 计数，含请求内同账号重试，不含诊断探测与本地连接保护错误）；`accountAutoFreezeWindowSeconds`
+取值 60～3,600（默认 600，随每次失败滑动顺延）；`accountAutoFreezeDurationSeconds` 取值 300～604,800
+（默认 7,200，即 2 小时，探测失败后按该时长顺延）。`accountAutoFreezeProbeEnabled` 开启时恢复 worker
+在到期后执行真实探测调用，成功才解冻；探测过程中和服务重启后继续阻止普通请求。关闭自动冻结或探测后，
+已有冻结等待当前冷却结束再恢复调度。`accountAutoFreezeProbeModel` 为 `string | null`，留空时自动
+选择账号可用的第一个模型。`accountAutoFreezeAdaptiveConcurrency` 开启时冻结期间把账号并发上限下调到
+观测在途峰值的 80%（下限 2，只降不升）。这会持久修改账号并发设置；跟随全局默认的账号也会设为独立上限，
+解冻后不自动恢复，管理员可手动改回。
 
 Windows 离线包接口固定解析 Microsoft Store Product ID `9PLM9XGG6VKS` 的 Retail 包，不接受调用方提供
 产品 ID、上游地址、ring 或文件名。后端只返回通过包名、架构、Microsoft CDN host/path、scheme 和失效
@@ -1105,10 +1154,10 @@ OpenAI Responses 用量记录的 `serviceTier` 与本地费用估算统一采用
 计算，托管工具调用费不随 Token 档位倍增。
 Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 供诊断；发送给客户端的
 原始 `response.service_tier` 不变。用量中的 Fast 仅表示发送档位，不能证明上游实际加速，本地费用
-估算也不能代替官方账单。该口径仅作用于新记录，不回填历史档位或重算已存储费用。
+估算也不能代替官方账单。档位与费用在请求记录生成时确定；查询不会回填历史档位或重算已存储费用。
 
-本地计价规则只保留尚在服务的型号；已过官方关闭日期的型号不再新增本地估价。清理计价规则不删除或
-重新计算已存储的历史费用；缺少当前计价规则时，历史总额仍保留，但无法再据此补充费用拆分。
+本地计价规则覆盖尚在服务的型号。已关闭型号或缺少计价规则时，不生成新的本地估价；已存储的历史费用
+保留原值，但缺少规则时无法补充费用拆分。
 
 ## 11. 版本、更新与重启
 
