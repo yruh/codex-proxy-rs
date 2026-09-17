@@ -612,7 +612,7 @@ async fn host_should_keep_workers_alive_until_http_drain_finishes() {
         "runtime_data_dir": "unused-test-runtime",
         "logging": {
             "level": "error", "stdout": true,
-            "file": { "enabled": false, "directory": "unused-test-logs" }
+            "file": { "enabled": false, "directory": "unused-test-logs", "max_file_size_mb": 20 }
         },
         "drain_timeout_seconds": 5,
         "worker_shutdown_timeout_seconds": 5
