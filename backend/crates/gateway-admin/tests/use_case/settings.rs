@@ -63,6 +63,7 @@ async fn settings_should_reject_zero_refresh_margin_before_store_call() {
             ReplaceRuntimeSettings {
                 openai_client_profile: None,
                 disable_fast: None,
+                request_overrides: None,
                 request_location_enabled: false,
                 request_location: Default::default(),
                 model_mappings: Default::default(),

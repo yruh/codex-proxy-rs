@@ -126,6 +126,66 @@ fn config_revision_should_reject_zero() {
 }
 
 #[test]
+fn request_overrides_route_only_marked_subagents_and_freeze_pricing() {
+    for enabled in [false, true] {
+        for is_subagent in [false, true] {
+            let snapshot =
+                snapshot().with_request_overrides(gateway_core::routing::RequestOverrides {
+                    disable_long_context_pricing: true,
+                    subagent_routing_enabled: enabled,
+                    subagent_model_mappings: BTreeMap::from([(
+                        "gpt-5.4".to_owned(),
+                        "gpt-5.6-luna".to_owned(),
+                    )]),
+                });
+            let plan = snapshot
+                .plan(
+                    &PublicModelId::new("gpt-5.4").unwrap(),
+                    &operation(),
+                    account_scope(),
+                    &RoutingContext {
+                        is_subagent,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let expected = if enabled && is_subagent {
+                "gpt-5.6-luna"
+            } else {
+                "gpt-5.5"
+            };
+            assert!(
+                plan.candidates().iter().all(|candidate| candidate
+                    .upstream_model()
+                    .unwrap()
+                    .as_str()
+                    == expected)
+            );
+            assert!(plan.disable_long_context_pricing());
+            assert_eq!(
+                plan.account_scope().provider_kinds(),
+                account_scope().provider_kinds()
+            );
+            let unmatched = snapshot
+                .plan(
+                    &PublicModelId::new("other-model").unwrap(),
+                    &operation(),
+                    account_scope(),
+                    &RoutingContext {
+                        is_subagent,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                unmatched.candidates()[0].upstream_model().unwrap().as_str(),
+                "other-model"
+            );
+        }
+    }
+}
+
+#[test]
 fn account_group_id_should_match_the_database_contract_exactly() {
     let valid = "grp_0123456789abcdef0123456789abcdef";
     assert_eq!(
@@ -547,6 +607,7 @@ fn blocked_provider_should_be_filtered() {
             &operation(),
             snapshot.all_account_scope(),
             &RoutingContext {
+                is_subagent: false,
                 required_provider: Some(ProviderKind::new("openai").expect("provider")),
                 blocked_providers: BTreeSet::from([ProviderKind::new("openai").expect("provider")]),
             },

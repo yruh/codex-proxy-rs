@@ -262,6 +262,15 @@ Authorization、Cookie、account ID、originator 和 User-Agent 均由代理安�
 Responses wire 之间的协议转换层，转换只在 xAI Provider 内完成。
 上游结构化错误的 message/code/type 按上述边界交付客户端，其中内嵌的账号指纹 UUID 已脱敏。模型映射是
 全局精确映射，未命中时模型名原样交给候选 Provider；分组只限定账号集合，不参与模型改名。
+管理设置 `requestOverrides.subagentRoutingEnabled` 默认关闭。开启后，携带 Provider 可识别的
+子代理标记（`subagent_kind` 或 `x-openai-subagent`）的请求优先匹配 `subagentModelMappings`；
+命中时一次性替换为目标模型，不再递归应用全局映射；未命中和主代理仍沿用全局映射。
+目标模型仍受账号范围、模型权限、能力和并发检查，费用及模型倍率按实际目标模型结算。
+
+`requestOverrides.disableLongContextPricing` 默认 false；设置为 true 后，OpenAI 文本请求超过
+272,000 输入 token 时仍采用普通上下文单价，再应用已有计费倍率。它不影响上游真实额度消耗。
+设置保存在运行快照中，只影响新请求，已开始的请求与历史金额保持原计价；旧客户端省略
+`requestOverrides` 时保留已有设置。子代理映射最多 100 条，模型 ID 必须满足现有标识校验。
 
 OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足错误时，代理在允许安全重放且
 尚未交付输出的前提下，先做最多 3 次同账号指数退避，再通过现有调度换号。默认间隔从 500ms 开始，

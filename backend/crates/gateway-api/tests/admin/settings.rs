@@ -105,6 +105,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
     let settings = RuntimeSettings {
         openai_client_profile: None,
         disable_fast: false,
+        request_overrides: Default::default(),
         request_location_enabled: false,
         request_location: Default::default(),
         config_revision: Revision::new(7).expect("revision"),
@@ -206,6 +207,7 @@ fn settings_request_and_response_fields_should_stay_in_lockstep() {
     let settings = RuntimeSettings {
         openai_client_profile: None,
         disable_fast: false,
+        request_overrides: Default::default(),
         request_location_enabled: false,
         request_location: Default::default(),
         config_revision: Revision::new(7).expect("revision"),

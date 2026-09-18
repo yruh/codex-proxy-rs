@@ -36,6 +36,7 @@ pub type ModelMappings = BTreeMap<String, String>;
 pub struct RuntimeSettingsView {
     pub openai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
     pub disable_fast: bool,
+    pub request_overrides: gateway_core::routing::RequestOverrides,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
     pub model_mappings: ModelMappings,
@@ -70,6 +71,7 @@ pub struct UpdateRuntimeSettingsRequest {
     #[serde(default, deserialize_with = "deserialize_profile_update")]
     pub openai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
     pub disable_fast: Option<bool>,
+    pub request_overrides: Option<gateway_core::routing::RequestOverrides>,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
     pub model_mappings: ModelMappings,
@@ -179,11 +181,23 @@ impl UpdateRuntimeSettingsRequest {
 
     fn into_command(self) -> Result<ReplaceRuntimeSettings, WireValidationError> {
         self.validate()?;
+        if let Some(policy) = &self.request_overrides {
+            if policy.subagent_model_mappings.len() > 100 {
+                return Err(WireValidationError::new("requestOverrides"));
+            }
+            for (source, target) in &policy.subagent_model_mappings {
+                PublicModelId::new(source.clone())
+                    .map_err(|_| WireValidationError::new("requestOverrides"))?;
+                UpstreamModelId::new(target.clone())
+                    .map_err(|_| WireValidationError::new("requestOverrides"))?;
+            }
+        }
         Ok(ReplaceRuntimeSettings {
             openai_client_profile: self
                 .openai_client_profile
                 .map(gateway_core::account::OpaqueProviderData::new),
             disable_fast: self.disable_fast,
+            request_overrides: self.request_overrides,
             request_location_enabled: self.request_location_enabled,
             request_location: self
                 .request_location
@@ -229,6 +243,7 @@ impl From<RuntimeSettings> for RuntimeSettingsView {
                 .openai_client_profile
                 .map(gateway_core::account::OpaqueProviderData::into_inner),
             disable_fast: settings.disable_fast,
+            request_overrides: settings.request_overrides,
             request_location_enabled: settings.request_location_enabled,
             request_location: settings.request_location,
             model_mappings: wire_model_mappings(settings.model_mappings),

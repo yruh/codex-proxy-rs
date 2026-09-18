@@ -8,6 +8,7 @@ export type RotationStrategy = 'smart' | 'quota_reset_priority' | 'round_robin' 
 export interface RuntimeSettings {
   openaiClientProfile: ClientProfileSelection
 
+  requestOverrides: { disableLongContextPricing: boolean, subagentRoutingEnabled: boolean, subagentModelMappings: Record<string, string> }
   disableFast: boolean
   requestLocationEnabled: boolean
   requestLocation: RequestLocation

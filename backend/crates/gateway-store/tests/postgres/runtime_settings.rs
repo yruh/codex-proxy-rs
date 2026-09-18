@@ -11,6 +11,7 @@ fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettingsUpdate {
     RuntimeSettingsUpdate {
         openai_client_profile: None,
         disable_fast: None,
+        request_overrides: None,
         request_location_enabled: false,
         request_location: Default::default(),
         admin_api_key: None,

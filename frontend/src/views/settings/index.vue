@@ -18,6 +18,7 @@ import ClientVersionSettings from './components/client-version/index.vue'
 import FastPolicyCard from './components/FastPolicyCard.vue'
 import ModelAliasesCard from './components/ModelAliasesCard.vue'
 import RequestLocationCard from './components/RequestLocationCard.vue'
+import RequestOverridesCard from './components/RequestOverridesCard.vue'
 import RequestQueueCard from './components/RequestQueueCard.vue'
 import ResponseBodyLimitCard from './components/ResponseBodyLimitCard.vue'
 import RotationStrategyCard from './components/RotationStrategyCard.vue'
@@ -43,6 +44,7 @@ const {
   error,
   form,
   mappings,
+  subagentMappings,
   addMapping,
   updateMapping,
   removeMapping,
@@ -151,6 +153,8 @@ onMounted(() => {
           v-model:concurrency-wait-timeout-seconds="concurrencyWaitTimeoutSecondsValue"
         />
         <FastPolicyCard v-model="form.disableFast" :disabled="saving || loading || !!error" />
+
+        <RequestOverridesCard v-model:disable-long-context-pricing="form.disableLongContextPricing" v-model:enabled="form.subagentRoutingEnabled" v-model:mappings="subagentMappings" :disabled="saving || loading || !!error" />
 
         <RequestLocationCard v-model="form.requestLocation" v-model:enabled="form.requestLocationEnabled" :disabled="saving || loading || !!error" />
         <AccountAutoFreezeCard

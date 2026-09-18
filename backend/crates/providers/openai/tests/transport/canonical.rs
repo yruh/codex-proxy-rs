@@ -59,6 +59,46 @@ fn response_model_observation_uses_explicit_body_and_never_request_fallback() {
 const METADATA_PREFIX_FIXTURE: &str = include_str!("fixtures/metadata_only_prefix.sse");
 
 #[test]
+fn long_context_policy_applies_to_http_and_websocket_with_cache_and_fast() {
+    for websocket in [false, true] {
+        for disabled in [false, true] {
+            for fast in [false, true] {
+                let mut decoder = CodexCanonicalDecoder::new("gpt-6-astra")
+                    .with_disabled_long_context_pricing(disabled)
+                    .with_requested_service_tier(fast.then_some("priority"))
+                    .with_raw_sse_passthrough();
+                let mut events = Vec::new();
+                for value in [
+                    json!({"type":"response.created","response":{"id":"resp_long"}}),
+                    json!({"type":"response.completed","response":{"id":"resp_long","status":"completed","output":[],"usage":{"input_tokens":300001,"output_tokens":1000,"total_tokens":301001,"input_tokens_details":{"cached_tokens":250000}}}}),
+                ] {
+                    let raw = value.to_string();
+                    let frame = if websocket {
+                        websocket_event_to_sse_frame(&raw).unwrap()
+                    } else {
+                        format!("data: {raw}\n\n")
+                    };
+                    events.extend(decoder.push(frame.as_bytes()).expect("priced response"));
+                }
+                let cost = canonical_facts(&events)
+                    .into_iter()
+                    .find_map(|event| match event {
+                        GatewayEvent::CalculatedCost(cost) => Some(cost.total().amount().scaled()),
+                        _ => None,
+                    })
+                    .expect("cost");
+                let standard = if disabled {
+                    8_000_100_000
+                } else {
+                    15_750_200_000
+                };
+                assert_eq!(cost, standard * if fast { 2 } else { 1 });
+            }
+        }
+    }
+}
+
+#[test]
 fn decoder_should_not_forward_codex_rate_limit_metadata_fixture_as_openai_wire() {
     let events = CodexCanonicalDecoder::new("fallback")
         .with_raw_sse_passthrough()

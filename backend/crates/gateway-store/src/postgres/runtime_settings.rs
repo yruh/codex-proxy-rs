@@ -21,6 +21,7 @@ use crate::{Revision, StoreError, StoreResult, postgres_unavailable};
 pub struct RuntimeSettings {
     pub openai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
     pub disable_fast: bool,
+    pub request_overrides: gateway_core::routing::RequestOverrides,
     pub config_revision: Revision,
     pub admin_api_key: Option<String>,
     pub refresh_margin_seconds: u64,
@@ -113,6 +114,7 @@ impl fmt::Debug for RuntimeSettings {
 pub struct RuntimeSettingsUpdate {
     pub openai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
     pub disable_fast: Option<bool>,
+    pub request_overrides: Option<gateway_core::routing::RequestOverrides>,
     pub admin_api_key: Option<String>,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u32,
@@ -235,7 +237,7 @@ impl RuntimeSettingsRepository for PgRuntimeSettingsRepository {
 
 pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResult<RuntimeSettings> {
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
-            "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, disable_fast,
+            "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, disable_fast,
                     refresh_concurrency, max_concurrent_per_account, request_interval_ms,
                     rotation_strategy, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
@@ -321,7 +323,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<RuntimeSettings> {
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
-        "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, disable_fast,
+        "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, disable_fast,
                 refresh_concurrency, max_concurrent_per_account, request_interval_ms,
                 rotation_strategy, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
@@ -378,6 +380,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      request_location_enabled = $24,
                      responses_max_decompressed_body_bytes = $25,
                      disable_fast = coalesce($26, disable_fast),
+                     request_overrides_json = coalesce($28, request_overrides_json),
                      provider_request_profiles_json = case when $27::jsonb is null then provider_request_profiles_json else jsonb_set(provider_request_profiles_json, '{openai}', $27) end,
 	                 updated_at = now()
 	             where id = 1
@@ -422,6 +425,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     )
     .bind(update.disable_fast)
     .bind(update.openai_client_profile.as_ref().map(|profile| sqlx::types::Json(profile.expose_to_provider())))
+    .bind(update.request_overrides.as_ref().map(sqlx::types::Json))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|_| postgres_unavailable("update runtime settings in transaction"))?
@@ -475,6 +479,7 @@ struct RuntimeSettingsRow {
         std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
     >,
     disable_fast: bool,
+    request_overrides_json: sqlx::types::Json<gateway_core::routing::RequestOverrides>,
     config_revision: i64,
     admin_api_key: Option<String>,
     refresh_margin_seconds: i64,
@@ -519,6 +524,7 @@ fn runtime_settings_from_row(mut row: RuntimeSettingsRow) -> StoreResult<Runtime
         request_interval_ms: to_u64(row.request_interval_ms)?,
         rotation_strategy: row.rotation_strategy,
         disable_fast: row.disable_fast,
+        request_overrides: row.request_overrides_json.0,
         request_location_enabled: row.request_location_enabled,
         request_location: row
             .request_location_json

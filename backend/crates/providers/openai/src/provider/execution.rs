@@ -740,6 +740,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         // WS 帧由 reducer 以 encode_sse_event(&event, raw) 逐字节内嵌上游原始 JSON
         // （transport/protocol/websocket.rs），push_frames 抽出的 data 即上游原文。
         let mut decoder = CodexCanonicalDecoder::new(upstream_model.as_str())
+            .with_disabled_long_context_pricing(context.disable_long_context_pricing())
             .with_reported_model(response.response_metadata.effective_model.as_deref())
             .with_requested_service_tier(request.service_tier())
             .with_request_tool_pricing(upstream_model.as_str(), request.tools())

@@ -755,6 +755,7 @@ impl SettingsStore for FixtureSettingsStore {
         Ok(RuntimeSettings {
             openai_client_profile: None,
             disable_fast: false,
+            request_overrides: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
             config_revision: Revision::new(1).expect("revision"),

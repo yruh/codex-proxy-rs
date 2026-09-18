@@ -316,6 +316,7 @@ impl ContinuationAttempt {
 pub struct RequestAttemptContext {
     request_profile: Option<crate::account::OpaqueProviderData>,
     disable_fast: bool,
+    disable_long_context_pricing: bool,
     request_location: Option<crate::account::RequestLocation>,
     request_id: ModelRequestId,
     client_api_key_ref: ClientApiKeyId,
@@ -331,6 +332,12 @@ impl RequestAttemptContext {
         profile: Option<crate::account::OpaqueProviderData>,
     ) -> Self {
         self.request_profile = profile;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_disable_long_context_pricing(mut self, disabled: bool) -> Self {
+        self.disable_long_context_pricing = disabled;
         self
     }
 
@@ -356,6 +363,7 @@ impl RequestAttemptContext {
             client_api_key_ref,
             request_profile: None,
             disable_fast: false,
+            disable_long_context_pricing: false,
             request_location: None,
             timing_started_at: Instant::now(),
             trace: crate::diagnostics::TraceContext::default(),
@@ -422,6 +430,11 @@ impl AttemptContext {
     #[must_use]
     pub const fn request_profile(&self) -> Option<&crate::account::OpaqueProviderData> {
         self.request.request_profile.as_ref()
+    }
+
+    #[must_use]
+    pub const fn disable_long_context_pricing(&self) -> bool {
+        self.request.disable_long_context_pricing
     }
 
     #[must_use]

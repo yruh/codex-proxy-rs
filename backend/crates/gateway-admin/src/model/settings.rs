@@ -19,6 +19,7 @@ pub use gateway_core::account::RotationStrategy;
 pub struct RuntimeSettings {
     pub openai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
     pub disable_fast: bool,
+    pub request_overrides: gateway_core::routing::RequestOverrides,
     pub config_revision: Revision,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
@@ -52,6 +53,7 @@ pub struct RuntimeSettings {
 pub struct ReplaceRuntimeSettings {
     pub openai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
     pub disable_fast: Option<bool>,
+    pub request_overrides: Option<gateway_core::routing::RequestOverrides>,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
     pub model_mappings: ModelMappings,

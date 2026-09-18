@@ -23,6 +23,7 @@ pub struct SnapshotRuntimeSettings {
     pub request_profiles:
         BTreeMap<gateway_core::routing::ProviderKind, gateway_core::account::OpaqueProviderData>,
     pub disable_fast: bool,
+    pub request_overrides: gateway_core::routing::RequestOverrides,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
     pub refresh_margin_seconds: u64,
@@ -163,6 +164,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 data.settings.responses_max_decompressed_body_bytes,
             )
             .with_disable_fast(data.settings.disable_fast)
+            .with_request_overrides(data.settings.request_overrides)
             .with_request_profiles(data.settings.request_profiles)
             .with_request_location(
                 data.settings.request_location,
@@ -263,6 +265,7 @@ struct SnapshotSettingsRow {
     request_location_enabled: bool,
     responses_max_decompressed_body_bytes: i64,
     disable_fast: bool,
+    request_overrides_json: sqlx::types::Json<gateway_core::routing::RequestOverrides>,
     provider_request_profiles_json:
         sqlx::types::Json<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
 }
@@ -271,7 +274,7 @@ async fn load_settings(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<(Revision, SnapshotRuntimeSettings)> {
     let row = sqlx::query_as::<_, SnapshotSettingsRow>(
-        "select config_revision, refresh_margin_seconds, refresh_concurrency, max_concurrent_per_account, request_interval_ms, rotation_strategy, model_mappings_json, min_codex_desktop_version, min_codex_cli_version, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, request_location_json, request_location_enabled, responses_max_decompressed_body_bytes, disable_fast, provider_request_profiles_json from runtime_settings where id = 1",
+        "select request_overrides_json, config_revision, refresh_margin_seconds, refresh_concurrency, max_concurrent_per_account, request_interval_ms, rotation_strategy, model_mappings_json, min_codex_desktop_version, min_codex_cli_version, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, request_location_json, request_location_enabled, responses_max_decompressed_body_bytes, disable_fast, provider_request_profiles_json from runtime_settings where id = 1",
     )
     .fetch_optional(&mut **transaction)
     .await
@@ -285,6 +288,7 @@ async fn load_settings(
         SnapshotRuntimeSettings {
             request_profiles: decode_request_profiles(row.provider_request_profiles_json.0)?,
             disable_fast: row.disable_fast,
+            request_overrides: row.request_overrides_json.0,
             responses_max_decompressed_body_bytes: to_u64(
                 row.responses_max_decompressed_body_bytes,
             )?,

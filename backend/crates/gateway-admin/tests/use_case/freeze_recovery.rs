@@ -27,6 +27,7 @@ fn runtime_settings(enabled: bool, probe_enabled: bool, adaptive: bool) -> Runti
     RuntimeSettings {
         openai_client_profile: None,
         disable_fast: false,
+        request_overrides: Default::default(),
         request_location_enabled: false,
         request_location: Default::default(),
         config_revision: revision(1),

@@ -462,11 +462,20 @@ pub fn openai_billing_breakdown(
     usage: OpenAiBillingUsage,
     service_tier: Option<&str>,
 ) -> Option<CalculatedCostBreakdown> {
+    openai_billing_breakdown_with_policy(model, usage, service_tier, false)
+}
+
+pub(crate) fn openai_billing_breakdown_with_policy(
+    model: &str,
+    usage: OpenAiBillingUsage,
+    service_tier: Option<&str>,
+    disable_long_context_pricing: bool,
+) -> Option<CalculatedCostBreakdown> {
     openai_billing_breakdown_with_context(
         model,
         usage,
         service_tier,
-        usage.input_tokens > LONG_CONTEXT_THRESHOLD,
+        !disable_long_context_pricing && usage.input_tokens > LONG_CONTEXT_THRESHOLD,
     )
 }
 

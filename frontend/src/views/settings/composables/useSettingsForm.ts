@@ -20,10 +20,13 @@ export function useSettingsForm() {
   const saving = saveAction.loading
   const error = shallowRef('')
   const mappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
+  const subagentMappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const savedRequestLocation = shallowRef<RequestLocation>()
   const form = reactive({
     openaiClientProfile: null as ClientProfileSelection | null,
     disableFast: false,
+    disableLongContextPricing: false,
+    subagentRoutingEnabled: false,
     requestLocationEnabled: false,
     requestLocation: { country: '', region: '', city: '', timezone: '' },
     refreshMarginSeconds: null as number | null,
@@ -55,6 +58,7 @@ export function useSettingsForm() {
     return {
       form: { ...form, requestLocation: { ...form.requestLocation } },
       mappings: mappings.value.map(row => ({ ...row })),
+      subagentMappings: subagentMappings.value.map(row => ({ ...row })),
     }
   }
 
@@ -67,6 +71,7 @@ export function useSettingsForm() {
       return
     Object.assign(form, saved.value.form, { requestLocation: { ...saved.value.form.requestLocation } })
     mappings.value = saved.value.mappings.map(row => ({ ...row }))
+    subagentMappings.value = saved.value.subagentMappings.map(row => ({ ...row }))
   }
 
   function numericModel(key: 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'requestIntervalMs' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'accountAutoFreezeThreshold' | 'accountAutoFreezeWindowSeconds' | 'accountAutoFreezeDurationSeconds') {
@@ -106,6 +111,9 @@ export function useSettingsForm() {
   function applySettings(data: Awaited<ReturnType<typeof getSettings>>) {
     savedRequestLocation.value = { ...data.requestLocation }
     form.disableFast = data.disableFast
+    form.disableLongContextPricing = data.requestOverrides?.disableLongContextPricing ?? false
+    form.subagentRoutingEnabled = data.requestOverrides?.subagentRoutingEnabled ?? false
+    subagentMappings.value = Object.entries(data.requestOverrides?.subagentModelMappings ?? {}).map(([requestedModel, upstreamModel]) => ({ requestedModel, upstreamModel }))
     form.requestLocationEnabled = data.requestLocationEnabled
     form.requestLocation = { ...data.requestLocation }
     form.refreshMarginSeconds = data.refreshMarginSeconds
@@ -170,9 +178,9 @@ export function useSettingsForm() {
     mappings.value = rows
   }
 
-  function mappingPayload() {
+  function mappingPayload(rows = mappings.value) {
     const entries: Record<string, string> = {}
-    for (const row of mappings.value) {
+    for (const row of rows) {
       const requested = row.requestedModel.trim()
       const upstream = row.upstreamModel.trim()
       if (!requested || !upstream)
@@ -235,6 +243,11 @@ export function useSettingsForm() {
       const result = await updateSettings({
         openaiClientProfile,
         disableFast: form.disableFast,
+        requestOverrides: {
+          disableLongContextPricing: form.disableLongContextPricing,
+          subagentRoutingEnabled: form.subagentRoutingEnabled,
+          subagentModelMappings: mappingPayload(subagentMappings.value),
+        },
         requestLocationEnabled: form.requestLocationEnabled,
         requestLocation,
         modelMappings: mappingPayload(),
@@ -278,6 +291,7 @@ export function useSettingsForm() {
     error,
     form,
     mappings,
+    subagentMappings,
     addMapping,
     updateMapping,
     removeMapping,

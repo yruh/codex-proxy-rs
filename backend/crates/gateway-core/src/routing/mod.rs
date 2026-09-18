@@ -494,9 +494,22 @@ impl ProviderModel {
     }
 }
 
+/// 管理员配置的请求覆盖；冻结在请求快照内，重试不读取新版本。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestOverrides {
+    #[serde(default)]
+    pub disable_long_context_pricing: bool,
+    #[serde(default)]
+    pub subagent_routing_enabled: bool,
+    #[serde(default)]
+    pub subagent_model_mappings: BTreeMap<String, String>,
+}
+
 /// 本次请求选择 Provider 时使用的动态过滤事实。
 #[derive(Debug, Clone, Default)]
 pub struct RoutingContext {
+    pub is_subagent: bool,
     /// 管理端 connection test 显式限制的 Provider；普通请求留空。
     pub required_provider: Option<ProviderKind>,
     pub blocked_providers: BTreeSet<ProviderKind>,
@@ -536,6 +549,7 @@ impl ProviderCandidate {
 /// 一次请求冻结的 Provider 尝试顺序。
 #[derive(Debug, Clone)]
 pub struct RoutingPlan {
+    disable_long_context_pricing: bool,
     disable_fast: bool,
     request_location: Option<crate::account::RequestLocation>,
     config_revision: ConfigRevision,
@@ -547,6 +561,11 @@ pub struct RoutingPlan {
 }
 
 impl RoutingPlan {
+    #[must_use]
+    pub const fn disable_long_context_pricing(&self) -> bool {
+        self.disable_long_context_pricing
+    }
+
     #[must_use]
     pub const fn disable_fast(&self) -> bool {
         self.disable_fast

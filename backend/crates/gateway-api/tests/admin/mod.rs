@@ -403,6 +403,9 @@ impl SettingsStore for MemorySettingsStore {
     ) -> AdminStoreResult<RuntimeSettings> {
         let mut settings = self.settings.lock().expect("settings");
         let updated = RuntimeSettings {
+            request_overrides: command
+                .request_overrides
+                .unwrap_or_else(|| settings.request_overrides.clone()),
             openai_client_profile: None,
             disable_fast: command.disable_fast.unwrap_or(settings.disable_fast),
             request_location_enabled: command.request_location_enabled,
@@ -1283,6 +1286,7 @@ fn test_runtime_settings() -> RuntimeSettings {
     RuntimeSettings {
         openai_client_profile: None,
         disable_fast: false,
+        request_overrides: Default::default(),
         request_location_enabled: false,
         request_location: Default::default(),
         config_revision: Revision::new(7).expect("revision"),

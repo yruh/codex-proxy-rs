@@ -25,8 +25,8 @@ use super::protocol::responses::{
     ResponseEventSignals, ResponsesSseFailure, response_event_signals,
 };
 use super::usage::{
-    OpenAiBillingUsage, WebSearchPricing, normalize_service_tier, openai_billing_breakdown,
-    web_search_pricing,
+    OpenAiBillingUsage, WebSearchPricing, normalize_service_tier,
+    openai_billing_breakdown_with_policy, web_search_pricing,
 };
 
 const CONTENTS_PER_OUTPUT: u32 = 1_024;
@@ -38,6 +38,7 @@ const CONTENTS_PER_OUTPUT: u32 = 1_024;
 pub struct CodexCanonicalDecoder {
     decoder: SseEventDecoder,
     upstream_model: String,
+    disable_long_context_pricing: bool,
     response_id: Option<String>,
     started: bool,
     completed: bool,
@@ -133,11 +134,18 @@ impl CodexCanonicalFailure {
 }
 
 impl CodexCanonicalDecoder {
+    #[must_use]
+    pub const fn with_disabled_long_context_pricing(mut self, disabled: bool) -> Self {
+        self.disable_long_context_pricing = disabled;
+        self
+    }
+
     /// 使用路由后最终发往上游的请求模型计价，并在响应缺少模型时用于 canonical 兜底。
     pub fn new(upstream_model: impl Into<String>) -> Self {
         Self {
             decoder: SseEventDecoder::default(),
             upstream_model: upstream_model.into(),
+            disable_long_context_pricing: false,
             response_id: None,
             started: false,
             completed: false,
@@ -902,12 +910,13 @@ impl CodexCanonicalDecoder {
             .filter(|usage| billable_usage_is_complete(response, *usage))
             .and_then(|usage| {
                 let (web_search_calls, file_search_calls) = tool_calls?;
-                openai_billing_breakdown(
+                openai_billing_breakdown_with_policy(
                     &self.upstream_model,
                     OpenAiBillingUsage::from(usage)
                         .with_web_search_calls(web_search_calls, self.web_search_pricing)
                         .with_file_search_calls(file_search_calls),
                     service_tier,
+                    self.disable_long_context_pricing,
                 )
             })
         {

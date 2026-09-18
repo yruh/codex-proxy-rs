@@ -22,6 +22,7 @@ mod time;
 pub(crate) use endpoints::valid_upstream_base_url;
 pub mod tls;
 pub mod usage;
+pub(crate) use usage::openai_billing_breakdown_with_policy;
 pub mod websocket;
 
 pub use self::{

@@ -394,10 +394,17 @@ impl DefaultExecutionService {
                 GatewayError::new(GatewayErrorKind::Internal, "system clock is invalid")
             })?;
         let request_id = new_request_id()?;
-        let routing_context = self
+        let mut routing_context = self
             .route_context(request.client.policy.account_scope().provider_kinds())
             .await?;
         let account_scope = Arc::clone(request.client.policy.account_scope());
+        // Provider 解析客户端原生标记，路由层不从提示词或模型名猜测子代理。
+        routing_context.is_subagent = account_scope.provider_kinds().iter().any(|provider| {
+            self.providers
+                .request_observation(provider, &request.operation, request.client.policy.key_id())
+                .subagent_kind
+                .is_some()
+        });
         let plan = match &request.target {
             ExecutionTarget::ProviderEndpoint(provider) => {
                 request.client.snapshot.plan_provider_endpoint(
@@ -736,6 +743,7 @@ impl DefaultExecutionService {
             }
         }
         Ok(RoutingContext {
+            is_subagent: false,
             required_provider: None,
             blocked_providers,
         })

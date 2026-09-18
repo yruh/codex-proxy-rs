@@ -28,6 +28,7 @@ const MAXIMUM_CATALOG_STABILITY_ATTEMPTS: usize = 4;
 /// Store 在一个一致性读取中提供的调度设置事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotSettingsFacts {
+    request_overrides: super::RequestOverrides,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     disable_fast: bool,
     request_location_enabled: bool,
@@ -45,6 +46,12 @@ pub struct SnapshotSettingsFacts {
 }
 
 impl SnapshotSettingsFacts {
+    #[must_use]
+    pub fn with_request_overrides(mut self, policy: super::RequestOverrides) -> Self {
+        self.request_overrides = policy;
+        self
+    }
+
     #[must_use]
     pub fn with_request_profiles(
         mut self,
@@ -102,6 +109,7 @@ impl SnapshotSettingsFacts {
         Self {
             disable_fast: false,
             request_profiles: BTreeMap::new(),
+            request_overrides: super::RequestOverrides::default(),
             request_location_enabled: false,
             request_location: crate::account::RequestLocation::default(),
             max_concurrent_per_account,
@@ -557,6 +565,7 @@ async fn compile_runtime_snapshot(
     .map(|snapshot| {
         snapshot
             .with_disable_fast(facts.settings.disable_fast)
+            .with_request_overrides(facts.settings.request_overrides)
             .with_request_location(request_location)
             .with_responses_max_decompressed_body_bytes(decompressed_body_limit)
             .with_client_queue_policy(client_queue_policy)
@@ -570,6 +579,7 @@ async fn compile_runtime_snapshot(
 /// 数据面使用的不可变配置快照。
 #[derive(Debug, Clone)]
 pub struct RuntimeSnapshot {
+    request_overrides: super::RequestOverrides,
     disable_fast: bool,
     responses_max_decompressed_body_bytes: std::num::NonZeroUsize,
     request_location: Option<crate::account::RequestLocation>,
@@ -589,6 +599,12 @@ pub struct RuntimeSnapshot {
 }
 
 impl RuntimeSnapshot {
+    #[must_use]
+    pub fn with_request_overrides(mut self, policy: super::RequestOverrides) -> Self {
+        self.request_overrides = policy;
+        self
+    }
+
     #[must_use]
     pub const fn with_disable_fast(mut self, disable_fast: bool) -> Self {
         self.disable_fast = disable_fast;
@@ -708,6 +724,7 @@ impl RuntimeSnapshot {
             provider_models: Arc::new(model_map),
             provider_model_presentations: Arc::new(presentation_map),
             model_mappings: Arc::new(BTreeMap::new()),
+            request_overrides: super::RequestOverrides::default(),
             provider_catalog_generations: Arc::new(BTreeMap::new()),
             exhaustive_provider_catalogs: Arc::new(exhaustive_provider_catalogs),
             account_directory: Arc::new(RuntimeAccountDirectory::default()),
@@ -961,13 +978,24 @@ impl RuntimeSnapshot {
                 continue;
             }
             let requested_model = public_model.as_str();
-            let mapped_model = self.mapped_model(requested_model);
-            let upstream_model = if self.model_mappings.contains_key(requested_model) {
-                UpstreamModelId::new(mapped_model)
-            } else {
-                UpstreamModelId::from_client_wire(mapped_model)
-            }
-            .map_err(|_| RoutingError::InvalidIdentifier)?;
+            let subagent_target = (context.is_subagent
+                && self.request_overrides.subagent_routing_enabled)
+                .then(|| {
+                    self.request_overrides
+                        .subagent_model_mappings
+                        .get(requested_model)
+                })
+                .flatten();
+            let mapped_model = subagent_target
+                .cloned()
+                .unwrap_or_else(|| self.mapped_model(requested_model));
+            let upstream_model =
+                if subagent_target.is_some() || self.model_mappings.contains_key(requested_model) {
+                    UpstreamModelId::new(mapped_model)
+                } else {
+                    UpstreamModelId::from_client_wire(mapped_model)
+                }
+                .map_err(|_| RoutingError::InvalidIdentifier)?;
             let emulated_features = match self
                 .provider_models
                 .get(provider)
@@ -1010,6 +1038,7 @@ impl RuntimeSnapshot {
         }
 
         Ok(RoutingPlan {
+            disable_long_context_pricing: self.request_overrides.disable_long_context_pricing,
             config_revision: self.revision,
             disable_fast: self.disable_fast || account_scope.disable_fast(),
             request_location: self.request_location.clone(),
@@ -1053,6 +1082,7 @@ impl RuntimeSnapshot {
             account_scope: Arc::clone(&account_scope),
         };
         Ok(RoutingPlan {
+            disable_long_context_pricing: self.request_overrides.disable_long_context_pricing,
             config_revision: self.revision,
             disable_fast: self.disable_fast || account_scope.disable_fast(),
             request_location: self.request_location.clone(),

@@ -179,10 +179,17 @@ where
                     .unwrap_or(Duration::ZERO),
             )
             .fuse(),
-            billing_model_id: request
-                .requested_model
-                .as_ref()
+            billing_model_id: plan
+                .candidates()
+                .first()
+                .and_then(|candidate| candidate.upstream_model())
                 .map(|model| model.as_str().to_owned())
+                .or_else(|| {
+                    request
+                        .requested_model
+                        .as_ref()
+                        .map(|model| model.as_str().to_owned())
+                })
                 .unwrap_or_default(),
             pending_request: Some(request),
             request_persisted: false,
@@ -825,6 +832,7 @@ where
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
                 .with_request_profile(self.request_profiles.get(candidate.provider()).cloned())
                 .with_disable_fast(self.plan.disable_fast())
+                .with_disable_long_context_pricing(self.plan.disable_long_context_pricing())
                 .with_request_location(self.plan.request_location().cloned())
                 .with_concurrency_wait_budget(self.concurrency_wait_budget.clone())
                 .with_timing_started_at(self.observation.timing_started_at)

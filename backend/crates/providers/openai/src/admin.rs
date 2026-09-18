@@ -64,9 +64,7 @@ use crate::transport::CodexWebSocketPool;
 use crate::transport::profile::{
     CodexDesktopReleaseSnapshot, CodexDesktopReleaseStatus, CodexWireProfile, CodexWireProfileState,
 };
-use crate::transport::{
-    CodexProfileAvatar, CodexProfileStatistics, OpenAiBillingUsage, openai_billing_breakdown,
-};
+use crate::transport::{CodexProfileAvatar, CodexProfileStatistics, OpenAiBillingUsage};
 
 const PROVIDER_NAME: &str = "openai";
 const PENDING_DOCUMENT_SCHEMA_VERSION: u64 = 3;
@@ -350,16 +348,25 @@ impl ProviderAdmin for OpenAiAdminProvider {
         else {
             return Ok(None);
         };
-        let Some(breakdown) = openai_billing_breakdown(
-            &input.upstream_model_id,
-            OpenAiBillingUsage::new(
-                input_tokens,
-                output_tokens,
-                input.cached_tokens.unwrap_or_default(),
-                input.cache_write_tokens.unwrap_or_default(),
-            ),
-            input.service_tier.as_deref(),
-        ) else {
+        let Some(breakdown) = [false, true]
+            .into_iter()
+            .filter_map(|disabled| {
+                crate::transport::openai_billing_breakdown_with_policy(
+                    &input.upstream_model_id,
+                    OpenAiBillingUsage::new(
+                        input_tokens,
+                        output_tokens,
+                        input.cached_tokens.unwrap_or_default(),
+                        input.cache_write_tokens.unwrap_or_default(),
+                    ),
+                    input.service_tier.as_deref(),
+                    disabled,
+                )
+            })
+            .find(|value| {
+                currency_cost(value.total_amount()).is_ok_and(|total| total == input.total)
+            })
+        else {
             return Ok(None);
         };
         let total_amount = currency_cost(breakdown.total_amount())?;
