@@ -795,6 +795,7 @@ where
         }));
         let context = AttemptContext::new(
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
+                .with_disable_fast(self.plan.disable_fast())
                 .with_request_location(self.plan.request_location().cloned())
                 .with_concurrency_wait_budget(self.concurrency_wait_budget.clone())
                 .with_timing_started_at(self.observation.timing_started_at)
@@ -1505,6 +1506,12 @@ where
             http_version,
             websocket_pool,
             service_tier,
+            upstream_response_model: self
+                .current
+                .as_ref()
+                .and_then(|current| current.response_observation.as_ref())
+                .and_then(ProviderResponseObservation::upstream_response_model)
+                .map(str::to_owned),
             provider_metadata_json,
             diagnostic_trace_json: self.trace.snapshot().map(|value| value.to_string()),
             error: None,
@@ -1666,6 +1673,12 @@ where
             http_version,
             websocket_pool,
             service_tier,
+            upstream_response_model: self
+                .current
+                .as_ref()
+                .and_then(|current| current.response_observation.as_ref())
+                .and_then(ProviderResponseObservation::upstream_response_model)
+                .map(str::to_owned),
             provider_metadata_json,
             diagnostic_trace_json: self.trace.snapshot().map(|value| value.to_string()),
             error: Some(finalization.error),
