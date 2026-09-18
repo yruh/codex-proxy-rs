@@ -392,6 +392,7 @@ pub async fn initialize(
         store.client_keys(),
         store.observability(),
     ));
+    let profile_provider = Arc::clone(&openai);
     let openai = Arc::new(DefaultOpenAiService::new(
         openai,
         store.accounts(),
@@ -431,6 +432,7 @@ pub async fn initialize(
         client_keys: Arc::new(DefaultClientKeyService::new(
             store.client_keys(),
             snapshot.clone(),
+            Arc::clone(&profile_provider),
         )),
         client_distribution: Arc::new(DefaultClientDistributionService::new(client_distribution)),
         observability: Arc::new(DefaultObservabilityService::new(
@@ -442,6 +444,7 @@ pub async fn initialize(
         settings: Arc::new(DefaultSettingsService::new(
             store.settings(),
             snapshot.clone(),
+            profile_provider,
         )),
         system: Arc::new(DefaultSystemService::new(system)),
         openai,
