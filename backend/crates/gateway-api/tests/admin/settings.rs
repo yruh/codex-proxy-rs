@@ -38,6 +38,7 @@ async fn response_json(response: axum::response::Response) -> Value {
 fn update_body() -> Value {
     json!({
         "disableFast": false,
+        "requestOverrides": {"disableLongContextPricing": false, "subagentRoutingEnabled": false, "subagentModelMappings": {}},
         "requestLocationEnabled": false,
         "requestLocation": {"country":"US", "region":"Ohio", "city":"Piketon", "timezone":"America/New_York"},
         "modelMappings": {
@@ -152,6 +153,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
         json!({
             "openaiClientProfile": null,
             "disableFast": false,
+        "requestOverrides": {"disableLongContextPricing": false, "subagentRoutingEnabled": false, "subagentModelMappings": {}},
         "requestLocationEnabled": false,
         "requestLocation": {"country":"US", "region":"Ohio", "city":"Piketon", "timezone":"America/New_York"},
             "modelMappings": {
@@ -655,4 +657,51 @@ fn global_profile_can_be_omitted_but_cannot_be_cleared() {
     body["openaiClientProfile"] =
         json!({"client":"cli", "platform":"linux", "versionMode":"latest"});
     assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(body).is_ok());
+}
+
+#[tokio::test]
+async fn request_overrides_roundtrip_preserves_omitted_policy_and_rejects_invalid_models() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let app = app(fixture.state());
+    let policy = json!({"disableLongContextPricing":true,"subagentRoutingEnabled":true,"subagentModelMappings":{"gpt-6-astra":"gpt-5.6-luna"}});
+    for supplied in [true, false] {
+        let mut body = update_body();
+        if supplied {
+            body["requestOverrides"] = policy.clone();
+        } else {
+            body.as_object_mut().unwrap().remove("requestOverrides");
+        }
+        let response = app
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = app
+            .clone()
+            .oneshot(request(Method::GET, "/api/admin/settings", None))
+            .await
+            .unwrap();
+        assert_eq!(
+            response_json(response).await["data"]["requestOverrides"],
+            policy
+        );
+    }
+    let mut body = update_body();
+    body["requestOverrides"] = policy;
+    body["requestOverrides"]["subagentModelMappings"] = json!({"source":""});
+    let response = app
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
