@@ -135,7 +135,7 @@ fn request_overrides_route_only_marked_subagents_and_freeze_pricing() {
                     subagent_routing_enabled: enabled,
                     subagent_model_mappings: BTreeMap::from([(
                         "gpt-5.4".to_owned(),
-                        "gpt-5.6-luna".to_owned(),
+                        "grok-4.5".to_owned(),
                     )]),
                 });
             let plan = snapshot
@@ -150,7 +150,7 @@ fn request_overrides_route_only_marked_subagents_and_freeze_pricing() {
                 )
                 .unwrap();
             let expected = if enabled && is_subagent {
-                "gpt-5.6-luna"
+                "grok-4.5"
             } else {
                 "gpt-5.5"
             };
@@ -168,7 +168,7 @@ fn request_overrides_route_only_marked_subagents_and_freeze_pricing() {
             );
             let unmatched = snapshot
                 .plan(
-                    &PublicModelId::new("other-model").unwrap(),
+                    &PublicModelId::new("gpt-5.5").unwrap(),
                     &operation(),
                     account_scope(),
                     &RoutingContext {
@@ -179,7 +179,7 @@ fn request_overrides_route_only_marked_subagents_and_freeze_pricing() {
                 .unwrap();
             assert_eq!(
                 unmatched.candidates()[0].upstream_model().unwrap().as_str(),
-                "other-model"
+                "gpt-5.5"
             );
         }
     }
