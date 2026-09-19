@@ -29,8 +29,8 @@ const MAXIMUM_CATALOG_STABILITY_ATTEMPTS: usize = 4;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotSettingsFacts {
     request_overrides: super::RequestOverrides,
+    pricing: Arc<crate::metering::PricingOverrides>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
-    disable_fast: bool,
     request_location_enabled: bool,
     request_location: crate::account::RequestLocation,
     max_concurrent_per_account: u32,
@@ -53,17 +53,17 @@ impl SnapshotSettingsFacts {
     }
 
     #[must_use]
+    pub fn with_pricing(mut self, pricing: crate::metering::PricingOverrides) -> Self {
+        self.pricing = Arc::new(pricing);
+        self
+    }
+
+    #[must_use]
     pub fn with_request_profiles(
         mut self,
         profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     ) -> Self {
         self.request_profiles = profiles;
-        self
-    }
-
-    #[must_use]
-    pub const fn with_disable_fast(mut self, disable_fast: bool) -> Self {
-        self.disable_fast = disable_fast;
         self
     }
 
@@ -107,9 +107,9 @@ impl SnapshotSettingsFacts {
         min_codex_cli_version: Option<String>,
     ) -> Self {
         Self {
-            disable_fast: false,
             request_profiles: BTreeMap::new(),
             request_overrides: super::RequestOverrides::default(),
+            pricing: Arc::default(),
             request_location_enabled: false,
             request_location: crate::account::RequestLocation::default(),
             max_concurrent_per_account,
@@ -564,8 +564,8 @@ async fn compile_runtime_snapshot(
     .map_err(|_| RuntimeSnapshotCompileError::InvalidData)
     .map(|snapshot| {
         snapshot
-            .with_disable_fast(facts.settings.disable_fast)
             .with_request_overrides(facts.settings.request_overrides)
+            .with_pricing(facts.settings.pricing)
             .with_request_location(request_location)
             .with_responses_max_decompressed_body_bytes(decompressed_body_limit)
             .with_client_queue_policy(client_queue_policy)
@@ -580,7 +580,7 @@ async fn compile_runtime_snapshot(
 #[derive(Debug, Clone)]
 pub struct RuntimeSnapshot {
     request_overrides: super::RequestOverrides,
-    disable_fast: bool,
+    pricing: Arc<crate::metering::PricingOverrides>,
     responses_max_decompressed_body_bytes: std::num::NonZeroUsize,
     request_location: Option<crate::account::RequestLocation>,
     revision: ConfigRevision,
@@ -606,8 +606,8 @@ impl RuntimeSnapshot {
     }
 
     #[must_use]
-    pub const fn with_disable_fast(mut self, disable_fast: bool) -> Self {
-        self.disable_fast = disable_fast;
+    pub fn with_pricing(mut self, pricing: Arc<crate::metering::PricingOverrides>) -> Self {
+        self.pricing = pricing;
         self
     }
 
@@ -715,7 +715,7 @@ impl RuntimeSnapshot {
         Ok(Self {
             responses_max_decompressed_body_bytes: std::num::NonZeroUsize::new(64 * 1024 * 1024)
                 .expect("positive default limit"),
-            disable_fast: false,
+            pricing: Arc::default(),
             request_location: None,
             revision,
             account_selection_policy,
@@ -1040,7 +1040,7 @@ impl RuntimeSnapshot {
         Ok(RoutingPlan {
             disable_long_context_pricing: self.request_overrides.disable_long_context_pricing,
             config_revision: self.revision,
-            disable_fast: self.disable_fast || account_scope.disable_fast(),
+            pricing: Arc::clone(&self.pricing),
             request_location: self.request_location.clone(),
             account_selection_policy: self.account_selection_policy,
             operation: operation.kind(),
@@ -1084,7 +1084,7 @@ impl RuntimeSnapshot {
         Ok(RoutingPlan {
             disable_long_context_pricing: self.request_overrides.disable_long_context_pricing,
             config_revision: self.revision,
-            disable_fast: self.disable_fast || account_scope.disable_fast(),
+            pricing: Arc::clone(&self.pricing),
             request_location: self.request_location.clone(),
             account_selection_policy: self.account_selection_policy,
             operation: operation.kind(),

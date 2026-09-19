@@ -20,8 +20,8 @@ use crate::{Revision, StoreError, StoreResult, postgres_unavailable};
 #[derive(Clone, PartialEq, Eq)]
 pub struct RuntimeSettings {
     pub openai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
-    pub disable_fast: bool,
     pub request_overrides: gateway_core::routing::RequestOverrides,
+    pub xai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
     pub config_revision: Revision,
     pub admin_api_key: Option<String>,
     pub refresh_margin_seconds: u64,
@@ -67,7 +67,6 @@ impl fmt::Debug for RuntimeSettings {
                 &self.max_concurrent_per_account,
             )
             .field("request_interval_ms", &self.request_interval_ms)
-            .field("disable_fast", &self.disable_fast)
             .field("rotation_strategy", &self.rotation_strategy)
             .field("request_location_enabled", &self.request_location_enabled)
             .field("request_location", &self.request_location)
@@ -113,8 +112,8 @@ impl fmt::Debug for RuntimeSettings {
 #[derive(Clone)]
 pub struct RuntimeSettingsUpdate {
     pub openai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
-    pub disable_fast: Option<bool>,
     pub request_overrides: Option<gateway_core::routing::RequestOverrides>,
+    pub xai_client_profile: Option<gateway_core::account::OpaqueProviderData>,
     pub admin_api_key: Option<String>,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u32,
@@ -150,7 +149,6 @@ impl fmt::Debug for RuntimeSettingsUpdate {
                 "admin_api_key",
                 &self.admin_api_key.as_ref().map(|_| "[REDACTED]"),
             )
-            .field("disable_fast", &self.disable_fast)
             .field("rotation_strategy", &self.rotation_strategy)
             .field("request_location_enabled", &self.request_location_enabled)
             .field("request_location", &self.request_location)
@@ -237,7 +235,7 @@ impl RuntimeSettingsRepository for PgRuntimeSettingsRepository {
 
 pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResult<RuntimeSettings> {
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
-            "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, disable_fast,
+            "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled,
                     refresh_concurrency, max_concurrent_per_account, request_interval_ms,
                     rotation_strategy, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
@@ -323,7 +321,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<RuntimeSettings> {
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
-        "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, disable_fast,
+        "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled,
                 refresh_concurrency, max_concurrent_per_account, request_interval_ms,
                 rotation_strategy, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
@@ -379,9 +377,10 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      request_location_json = $23,
                      request_location_enabled = $24,
                      responses_max_decompressed_body_bytes = $25,
-                     disable_fast = coalesce($26, disable_fast),
                      request_overrides_json = coalesce($28, request_overrides_json),
-                     provider_request_profiles_json = case when $27::jsonb is null then provider_request_profiles_json else jsonb_set(provider_request_profiles_json, '{openai}', $27) end,
+                     provider_request_profiles_json = provider_request_profiles_json
+                         || case when $26::jsonb is null then '{}'::jsonb else jsonb_build_object('openai', $26::jsonb) end
+                         || case when $27::jsonb is null then '{}'::jsonb else jsonb_build_object('xai', $27::jsonb) end,
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -423,8 +422,8 @@ pub(crate) async fn update_runtime_settings_in_transaction(
         i64::try_from(update.responses_max_decompressed_body_bytes)
             .map_err(|_| invalid_numeric())?,
     )
-    .bind(update.disable_fast)
     .bind(update.openai_client_profile.as_ref().map(|profile| sqlx::types::Json(profile.expose_to_provider())))
+    .bind(update.xai_client_profile.as_ref().map(|profile| sqlx::types::Json(profile.expose_to_provider())))
     .bind(update.request_overrides.as_ref().map(sqlx::types::Json))
     .fetch_optional(&mut **transaction)
     .await
@@ -478,7 +477,6 @@ struct RuntimeSettingsRow {
     provider_request_profiles_json: sqlx::types::Json<
         std::collections::BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
     >,
-    disable_fast: bool,
     request_overrides_json: sqlx::types::Json<gateway_core::routing::RequestOverrides>,
     config_revision: i64,
     admin_api_key: Option<String>,
@@ -516,6 +514,11 @@ fn runtime_settings_from_row(mut row: RuntimeSettingsRow) -> StoreResult<Runtime
             .0
             .remove("openai")
             .map(gateway_core::account::OpaqueProviderData::new),
+        xai_client_profile: row
+            .provider_request_profiles_json
+            .0
+            .remove("xai")
+            .map(gateway_core::account::OpaqueProviderData::new),
         config_revision: Revision::new(to_u64(row.config_revision)?)?,
         admin_api_key: row.admin_api_key,
         refresh_margin_seconds: to_u64(row.refresh_margin_seconds)?,
@@ -523,7 +526,6 @@ fn runtime_settings_from_row(mut row: RuntimeSettingsRow) -> StoreResult<Runtime
         max_concurrent_per_account: to_u32(row.max_concurrent_per_account)?,
         request_interval_ms: to_u64(row.request_interval_ms)?,
         rotation_strategy: row.rotation_strategy,
-        disable_fast: row.disable_fast,
         request_overrides: row.request_overrides_json.0,
         request_location_enabled: row.request_location_enabled,
         request_location: row

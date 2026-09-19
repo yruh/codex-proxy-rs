@@ -23,6 +23,7 @@ mod local_usage;
 mod observability;
 mod ops_events;
 mod portal;
+mod pricing;
 mod provider_accounts;
 mod proxies;
 mod query_budget;

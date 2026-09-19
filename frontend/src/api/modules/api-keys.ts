@@ -1,12 +1,14 @@
 import type { RequestOptions } from '../request'
 import type { AccountGroupRef } from './account-groups'
-import type { ClientProfileSelection } from './client-profiles'
+import type { ClientProfileSelection, XaiClientProfileSelection } from './client-profiles'
 import request from '../request'
 
 export type ApiKeyRoutingScope = 'all' | 'groups'
+export type ApiKeyBudgetPeriod = 'daily' | 'weekly' | 'all'
 
 export interface ApiKey {
   openaiClientProfileOverride: ClientProfileSelection | null
+  xaiClientProfileOverride: XaiClientProfileSelection | null
 
   id: string
   name: string
@@ -61,6 +63,7 @@ interface ApiKeyListParams {
 
 export interface ApiKeyWriteParam {
   openaiClientProfileOverride: ClientProfileSelection | null
+  xaiClientProfileOverride: XaiClientProfileSelection | null
 
   name: string
   label: string | null
@@ -119,6 +122,14 @@ export function revealApiKey(data: ApiKeyIdParam) {
 export function deleteApiKey(data: ApiKeyIdParam) {
   return request<ApiKeyMutationResponse>({
     url: '/api/admin/client-keys/delete',
+    method: 'POST',
+    data,
+  })
+}
+
+export function resetApiKeyBudget(data: ApiKeyIdParam & { period: ApiKeyBudgetPeriod }) {
+  return request<ApiKeyMutationResponse>({
+    url: '/api/admin/client-keys/reset-budget',
     method: 'POST',
     data,
   })

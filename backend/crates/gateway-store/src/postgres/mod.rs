@@ -24,6 +24,7 @@ mod observability;
 mod ops_events;
 mod portal;
 mod portal_admission;
+mod pricing;
 mod provider_accounts;
 mod proxies;
 mod retention;

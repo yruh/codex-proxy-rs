@@ -12,6 +12,7 @@ import BaseIconButton from '@/components/base/BaseIconButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal/index.vue'
 import ClientProfileEditor from '@/components/client-profile/ClientProfileEditor.vue'
+import XaiClientProfileEditor from '@/components/client-profile/XaiClientProfileEditor.vue'
 
 const props = defineProps<{
   groups: AccountGroup[]
@@ -28,13 +29,14 @@ const emit = defineEmits<{
 const open = defineModel<boolean>({ default: false })
 const createdOpen = defineModel<boolean>('createdOpen', { default: false })
 const form = defineModel<ApiKeyFormValue>('form', { required: true })
-const title = computed(() => props.editing ? '编辑 API Key' : '创建 API Key')
+const title = computed(() => props.editing ? '编辑密钥' : '创建 API Key')
 </script>
 
 <template>
   <BaseModal
     v-model="open"
     :title="title"
+    description="配置密钥信息、分组与使用限制"
     tone="info"
     size="lg"
     :dismissible="!saving"
@@ -86,8 +88,11 @@ const title = computed(() => props.editing ? '编辑 API Key' : '创建 API Key'
         />
       </BaseFormItem>
 
-      <BaseFormItem label="上游身份">
+      <BaseFormItem label="OpenAI 上游身份">
         <ClientProfileEditor v-if="open" v-model="form.openaiClientProfileOverride" allow-inherit :disabled="saving" />
+      </BaseFormItem>
+      <BaseFormItem label="xAI 上游身份">
+        <XaiClientProfileEditor v-if="open" v-model="form.xaiClientProfileOverride" allow-inherit :disabled="saving" />
       </BaseFormItem>
 
       <div class="grid gap-6 sm:grid-cols-2">
@@ -106,13 +111,13 @@ const title = computed(() => props.editing ? '编辑 API Key' : '创建 API Key'
             </template>
           </BaseInput>
         </BaseFormItem>
-        <BaseFormItem label="周限额">
+        <BaseFormItem label="7日限额">
           <BaseInput
             v-model="form.weeklyLimitUsd"
             type="number"
             min="0"
             step="any"
-            aria-label="周限额（美元）"
+            aria-label="7日限额（美元）"
             placeholder="不限制"
             :disabled="saving"
           >

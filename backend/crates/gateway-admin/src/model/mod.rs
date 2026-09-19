@@ -13,6 +13,7 @@ pub mod key_usage;
 pub mod local_usage;
 pub mod observability;
 pub mod portal;
+pub mod pricing;
 pub mod provider_credentials;
 pub mod proxies;
 pub mod quota_forecast;
