@@ -138,7 +138,7 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id,
+    "select mr.id, client_key.name as client_api_key_name,
             (select jsonb_build_object('baseCostUsd', e.base_cost_usd::text,
                  'multiplier', e.multiplier::text, 'chargedUsd', (-e.amount_usd)::text)
                from portal_wallet_events e where e.id = 'usage:' || mr.id
@@ -161,7 +161,8 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
             host(mr.client_ip) as client_ip, mr.user_agent,
             mr.reasoning_effort, mr.reasoning_preset, mr.subagent_kind, mr.compact,
             mr.started_at
-     from model_requests mr";
+     from model_requests mr
+     left join client_api_keys client_key on client_key.id = mr.client_api_key_ref";
 
 pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
     "select mr.id,

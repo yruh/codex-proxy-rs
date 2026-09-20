@@ -93,6 +93,7 @@ fn usage_record() -> UsageListRecord {
     UsageListRecord {
         user_charge: None,
         portal_username: None,
+        client_api_key_name: Some("Production".to_owned()),
         id: "req-visible".to_owned(),
         endpoint: "/v1/responses".to_owned(),
         client_transport: "http_sse".to_owned(),
@@ -150,6 +151,7 @@ fn usage_record() -> UsageListRecord {
 fn error_record() -> OpsError {
     OpsError {
         portal_username: None,
+        client_api_key_name: Some("Production".to_owned()),
         source: "private-sentinel".to_owned(),
         event_id: "error-visible".to_owned(),
         request_id: Some("private-sentinel".to_owned()),

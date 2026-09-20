@@ -314,6 +314,7 @@ pub struct UsageCalculatedBillingFact {
 /// Provider 已确认的逐项费用与单价。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalculatedBillingBreakdown {
+    pub long_context_billing_applied: bool,
     pub image: Option<ImageBillingBreakdown>,
     pub custom_multiplier_bps: u32,
     pub input_amount: CurrencyCost,
@@ -559,6 +560,7 @@ pub struct UserCharge {
 pub struct UsageListRecord {
     pub user_charge: Option<UserCharge>,
     pub portal_username: Option<String>,
+    pub client_api_key_name: Option<String>,
     pub id: String,
     pub endpoint: String,
     pub client_transport: String,
@@ -790,6 +792,7 @@ pub struct DiagnosticObservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpsError {
     pub portal_username: Option<String>,
+    pub client_api_key_name: Option<String>,
     pub source: String,
     pub event_id: String,
     pub request_id: Option<String>,

@@ -33,6 +33,7 @@ export interface UsageCostCoverage {
 }
 
 export interface UsageBilling {
+  longContextBillingApplied: boolean
   image?: {
     inputAmountDisplay: string
     cacheReadAmountDisplay: string
@@ -82,6 +83,7 @@ export interface UserCharge {
 export interface UsageListRecord {
   userCharge?: UserCharge | null
   portalUsername: string | null
+  clientApiKeyName: string | null
   id: string
   provider: string | null
   authenticationKind: string | null
@@ -270,6 +272,7 @@ export interface OpsErrorMetadata {
 
 export interface OpsError {
   portalUsername: string | null
+  clientApiKeyName: string | null
   id: string
   requestId: string | null
   clientApiKeyId: string | null

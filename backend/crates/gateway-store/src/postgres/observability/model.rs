@@ -486,6 +486,7 @@ pub struct DashboardObservation {
 pub struct UsageListRecord {
     pub user_charge: Option<gateway_admin::model::observability::UserCharge>,
     pub portal_username: Option<String>,
+    pub client_api_key_name: Option<String>,
     pub billing_snapshot_json: Option<serde_json::Value>,
     pub id: String,
     pub endpoint: String,
@@ -701,6 +702,7 @@ pub struct DiagnosticObservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpsErrorRecord {
     pub portal_username: Option<String>,
+    pub client_api_key_name: Option<String>,
     pub source: String,
     pub event_id: String,
     pub request_id: Option<String>,

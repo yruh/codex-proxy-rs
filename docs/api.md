@@ -190,7 +190,11 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 
 Responses 上游编码会移除 Codex 不接受的顶层 `temperature`、`max_output_tokens` 和
 `prompt_cache_retention`。缺少顶层 `store` 时补齐 `false`，与官方 Codex 客户端一致；
-显式提供的值保持原样。HTTP/SSE 与 WebSocket 共用这条正文兼容规则。
+显式提供的值保持原样。顶层 `input` 为字符串时按公开 Responses API 的语义展开为一条
+`user` 文本消息条目（`{"type": "message", "role": "user", "content": [{"type": "input_text", ...}]}`），
+因为 Codex 后端只接受条目数组；数组及其他类型原样透传。`input` 数组中显式指定 `type: "message"`
+且 `role: "system"` 的消息，其角色转换为 Codex 接受的 `developer`；消息内容、顺序、其他字段和顶层
+`instructions` 保持不变。HTTP/SSE 与 WebSocket 共用这条正文兼容规则。
 `prompt_cache_key`、`reasoning`、`include` 等 Codex 参数继续保留。过滤只作用于顶层，
 不删除工具参数 schema、输入内容或 `client_metadata` 内的同名业务字段；其他未知字段继续透传。
 
@@ -289,6 +293,10 @@ SSE/WS 的 `response.failed` 保留原消息、响应 ID 与其他业务字段�
 客户端决定如何恢复，代理不因此重放已提交的请求。
 明确额度耗尽触发账号隔离与安全换号，
 包括 WebSocket 握手返回的 429；不会因其长 `Retry-After` 而转入同账号传输恢复等待。
+OpenAI 选号阶段确认本次可选账号全部额度耗尽时，HTTP 返回 `429`，WebSocket 错误帧返回
+`status: 429`，两者的 `error.type` 与 `error.code` 均为 `usage_limit_reached`，提示客户端停止
+本轮自动重试，等待额度恢复或补充可用账号。空账号池、认证失效和临时容量不足不按额度耗尽处理；
+仍有其他可用 Provider 或可安全恢复的续写时，网关先按现有路由规则尝试恢复。
 
 带 `previous_response_id` 的 OpenAI 原生续写仍绑定原账号。若该账号明确拒绝请求且额度已耗尽，
 并且请求可安全重放、尚无语义输出且未提交下游，网关隔离该账号，对客户端返回 HTTP `400`
@@ -339,7 +347,7 @@ SSE/WS 的 `response.failed` 保留原消息、响应 ID 与其他业务字段�
 认证错误共用 `40101`（会话失效）、`40102`（凭据错误）和 `40301`（权限不足）。
 前端只在明确的会话失效时统一退出，不按 URL 或每个接口上的身份标记分发。
 
-### Key 用量查询
+### Key 用量与客户端配置
 
 以下接口仅接受 Key 身份的 `cpr_session`，不接受 Bearer Key 或管理 API Key。管理员会话返回 `40301`；
 缺失、失效或已停用的 Key 会话返回 `40101`。所有响应带 `Cache-Control: no-store`，未知路径和错误方法返回 JSON。
@@ -348,8 +356,9 @@ SSE/WS 的 `response.failed` 保留原消息、响应 ID 与其他业务字段�
 | --- | --- | --- | --- |
 | `GET` | `/api/key-usage/overview` | `startTime`、`endTime`、`model?` | 用量汇总、趋势、当前额度和北京时间今日健康时间线 |
 | `GET` | `/api/key-usage/records` | 同上，另含 `kind?`、`currentPage?`、`pageSize?` | 当前 Key 的成功请求或错误记录 |
+| `GET` | `/api/key-usage/config` | 无 | 当前 Key 的客户端配置凭据 |
 
-起止时间使用 RFC3339，开始必须早于结束，一次最多 31 天。模型按完整名称匹配；
+用量查询的起止时间使用 RFC3339，开始必须早于结束，一次最多 31 天。模型按完整名称匹配；
 不接受 Key ID、账号、Provider 等范围参数或其他未知字段。页码默认 1，每页默认 20，允许 1–100 条；
 `kind` 为 `success`（默认）或 `error`。分页响应为 `{ items, currentPage, pageSize, total }`。
 
@@ -368,6 +377,10 @@ Token 明细、费用明细、用时/首字与状态。Token 和费用复用现�
 首推理、首文本和总耗时，不含账号容量或调度诊断。
 成功记录的 `status` 为 `success`，不伪造未保存的 HTTP 状态；错误记录为 `error`，只返回客户端状态码，
 缺失的 Token/费用明细为 null。不返回账号资料、Key ID、上游模型或请求标识、原始错误正文或诊断内容。
+
+config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前 Key，不接受任何查询参数。
+使用统计页在打开“密钥配置”弹窗时读取，用于复制 Codex 配置文件或导入 CCSwitch；
+明文不进入用量轮询响应或浏览器持久化存储，关闭弹窗后清除页面中的配置状态。
 
 ## 5. 账号
 
@@ -703,8 +716,10 @@ OAuth start 使用：
 - `GET /accounts/quota` 只读取最后一次落库快照；`POST /accounts/quota/refresh` 才访问上游。access token
   已过期时，额度刷新要求先走 credential 刷新或重新授权，不会拿过期 token 探测额度。
 - OpenAI 已耗尽账号每 30 分钟主动复核一次，也会在最早未恢复窗口的 `resetAt + 2 分钟` 到期后
-  提前复核。后台每 30 秒检查触发条件；同一重置边界复核后仍未恢复时回到 30 分钟重试，
-  避免旧 reset 持续触发请求。各窗口独立确认恢复，时间到期本身不会直接解除账号耗尽。
+  提前复核；周期复核不等待旧重置时间，因此也能发现官方提前重置。正常账号有非零用量或触顶窗口时，
+  在该窗口的 `resetAt + 2 分钟` 后主动复核。后台每 30 秒检查触发条件；同一重置边界复核后仍未更新时
+  回到 30 分钟重试，避免旧 reset 持续触发请求。各窗口独立确认恢复，时间到期本身不会直接解除账号
+  耗尽或将展示用量归零。
 - `POST /accounts/recover` 是管理员对本地事实的强制恢复：它清除 Redis cooldown 和已保存的额度/错误，
   把账号重新启用并恢复为可调度 credential；它不验证上游账号是否已经恢复，下一次真实请求仍可重新写入
   失败事实。
@@ -1147,8 +1162,9 @@ User-Agent 使用 `grok-shell/<版本> (<系统>; <架构>)`，其中 `arm64` �
 
 ### 账号自动冻结
 
-账号自动冻结（`accountAutoFreezeEnabled`）默认关闭。启用后，在统计窗口内按尝试累计容量类上游错误（`server_is_overloaded`
-等与 5xx 不可用），达到阈值后把该账号冻结为带恢复倒计时的 `rate_limited` 状态。`accountAutoFreezeThreshold`
+账号自动冻结（`accountAutoFreezeEnabled`）默认关闭。启用后，在统计窗口内按尝试累计明确的上游容量拒绝
+（`server_is_overloaded`、`slow_down` 或结构化错误中的明确过载提示），普通 5xx、`invalid_prompt` 和未识别的上游错误不计入。
+达到阈值后把该账号冻结为带恢复倒计时的 `rate_limited` 状态。`accountAutoFreezeThreshold`
 取值 2～1,000（默认 12，按普通请求的 attempt 计数，含请求内同账号重试，不含诊断探测与本地连接保护错误）；`accountAutoFreezeWindowSeconds`
 取值 60～3,600（默认 600，随每次失败滑动顺延）；`accountAutoFreezeDurationSeconds` 取值 300～604,800
 （默认 7,200，即 2 小时，探测失败后按该时长顺延）。`accountAutoFreezeProbeEnabled` 开启时恢复 worker
@@ -1354,9 +1370,14 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 原始 `response.service_tier` 不变。用量中的 Fast 仅表示发送档位，不能证明上游实际加速，本地费用
 估算也不能代替官方账单。档位与费用在请求记录生成时确定；查询不会回填历史档位或重算已存储费用。
 
+`/api/admin/usage/records` 与 `/api/admin/ops/errors` 的记录返回 `clientApiKeyName`，为关联 Key 的当前名称；
+Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥原文。
+
 本地计价使用[模型定价](#模型定价)的生效规则。缺少内置、同步及人工价格时不生成估价。新请求的本地
 费用明细、有效单价、服务档位与自定义倍率随终态记录持久化，后续改价和清除覆盖不重算历史明细。
-旧记录没有费用快照时仍按内置规则核对总额后补充拆分，核对失败只显示原总额。图像明细通过可选的
+旧记录没有费用快照时仍按内置规则核对总额后补充拆分，核对失败只显示原总额。
+`billing.longContextBillingApplied` 表示已应用长上下文价格区间，与服务档位、自定义倍率独立；
+旧费用快照未记录该事实或只有总额时返回 `false`，不按当前价格倒推历史标识。图像明细通过可选的
 `billing.image` 返回 `inputAmountDisplay`、`cacheReadAmountDisplay`、`inputPriceDisplay` 和
 `cacheReadPriceDisplay`；存在该字段时，普通输入与缓存字段仅表示文本输入，输出字段表示图像输出。
 
@@ -1367,11 +1388,30 @@ Provider metadata 分别保留 `requestedServiceTier` 与 `upstreamServiceTier` 
 | `GET` | `/api/admin/system/version` | 无 | 当前构建、部署模式和可用更新 |
 | `GET` | `/api/admin/system/update/detail` | `refresh=true|false` | 读取或强制刷新 Release 详情 |
 | `GET` | `/api/admin/system/update/events` | 无 | SSE 更新事件流 |
-| `POST` | `/api/admin/system/update` | 可选 `{ targetVersion }` | 开始在线更新 |
+| `POST` | `/api/admin/system/update` | `{ targetVersion }` | 受理后台在线更新，返回 `202` |
 | `GET` | `/api/admin/system/update/status` | 无 | 查询当前更新或回滚状态 |
 | `POST` | `/api/admin/system/rollback` | 无 | 回滚到保留的上一版本 |
 | `POST` | `/api/admin/system/restart` | 无 | 请求进程重启 |
 
-在线更新仅在当前部署模式、Release 资产和进程重启能力都满足要求时可用，且只在同一 major 版本内
-提供：跨大版本目标会以 `40901` 冲突拒绝，需按发布说明重新部署。
+在线更新遵循[版本命名与升级规则](../deploy/README.md#版本命名与升级规则)。版本接口的
+`updateChannel` 由当前版本推导，取值为 `stable`、`alpha`、`beta`、`rc`、`exp`，无法识别时为 `unknown`。
+检查与执行使用同一规则，禁止的通道转换、跨实验线、跨大版本、降级或同版本重装均以 `40901` 拒绝。
+`hasUpdate=true` 仅表示当前构建支持在线更新，且存在允许的更高版本；`latestVersion`、`releaseUrl` 和
+`notes` 对应这个候选。没有可升级候选时，`hasUpdate=false`、`latestVersion` 为当前版本，
+`releaseUrl` 和 `notes` 保留当前版本的已发布 Release 信息；找不到匹配当前版本的 Release 时为空。
+当前构建不支持在线更新时不查询 Release，`hasUpdate=false`、`latestVersion` 为当前版本，
+`releaseUrl` 和 `notes` 为空，不支持原因通过 `updateSupported=false`、`unsupportedReason` 返回。
+强制检查失败时通过 `warning` 返回错误，`hasUpdate=false`，不以旧缓存或“没有更新”掩盖失败。
+普通查询可复用 20 分钟内的结果。下载时仍会校验目标资产、校验和及归档。
+
+更新 POST 在本地校验目标版本并持久化任务后返回 `202`，数据包含 `operationId`、`targetVersion`、
+`deploymentMode` 和 `message`，只表示已受理。Release 查询、远端目标复核、下载、校验及文件替换在后台
+执行，结果通过 `/update/status` 的 `operation` 查询：`status` 为 `idle`、`running`、`succeeded` 或 `failed`，
+终态包含 `finishedAt`，失败原因在 `error` 中。SSE 的 `operationId` 用于关联进度；终态事件发出前状态已落盘。
+连接中断不取消已受理任务；响应丢失时先查询状态，不自动重复提交。打开更新页面时也会恢复最近一次任务。
+
+状态响应的 `currentVersion` 表示已安装文件的版本，运行中的版本仍以 `/version` 为准。
+`needRestart=true` 表示成功安装的版本尚未在当前进程生效，此时应调用重启接口，不能重复发起更新。
+Host 关闭或任务取消会记录失败终态；状态查询会收敛无执行锁的遗留 `running`。
+异常退出留下的锁仍遵循 30 分钟过期规则，未过期前不会抢占其他进程的操作。
 实例升级和仓库发版见 [部署文档](../deploy/README.md#镜像升级与源码构建)。

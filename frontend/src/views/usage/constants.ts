@@ -7,6 +7,7 @@ type OpsErrorRow = OpsError
 
 export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
   { key: 'portalUsername', label: '用户', kind: 'identity', size: 'lg', emptyText: '未分配用户' },
+  { key: 'clientApiKeyName', label: '密钥名称', kind: 'identity', size: 'xl' },
   {
     key: 'accountEmail',
     hideable: false,
@@ -27,7 +28,7 @@ export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
   { key: 'upstreamTransport', label: '上游', kind: 'status', size: 'md' },
   { key: 'clientTransport', label: '接入', kind: 'status', size: 'md' },
   { key: 'tokenDetails', label: 'TOKEN', kind: 'numeric', size: 'xl' },
-  { key: 'billing', label: '上游成本 / 计费', kind: 'numeric', size: 'lg' },
+  { key: 'billing', label: '上游成本 / 计费', kind: 'numeric', size: 'xl' },
   { key: 'latency', label: '延迟', kind: 'numeric', size: 'xl' },
   { key: 'createdAtDisplay', label: '时间', kind: 'datetime' },
   { key: 'clientIp', label: 'IP', kind: 'custom', size: '3xl' },
@@ -37,6 +38,7 @@ export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
 
 export const opsErrorColumns = defineTableColumns<OpsErrorRow>([
   { key: 'portalUsername', label: '用户', kind: 'identity', size: 'lg', emptyText: '未分配用户' },
+  { key: 'clientApiKeyName', label: '密钥名称', kind: 'identity', size: 'xl' },
   { key: 'accountId', label: '上游账号', kind: 'identity', size: '3xl', emptyText: '未知账号', hideable: false },
   { key: 'provider', label: '平台/类型', kind: 'custom', size: 'sm' },
   { key: 'message', label: '错误', kind: 'custom', size: '4xl', hideable: false },

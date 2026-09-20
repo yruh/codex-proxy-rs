@@ -46,7 +46,7 @@ const {
 
 const selectedRecord = shallowRef<OpsError | null>(null)
 const detailOpen = shallowRef(false)
-const { visibleColumns, columnOptions, setColumnVisible, resetColumns } = useTableColumns(opsErrorColumns, 'ops-errors')
+const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(opsErrorColumns, 'ops-errors')
 
 const upstreamSendStateLabels: Record<string, string> = {
   sent: '已发送',
@@ -110,6 +110,7 @@ function upstreamSendStateText(value: string | null | undefined) {
         <BaseTableColumnSettings
           :options="columnOptions"
           @change="setColumnVisible"
+          @reorder="setColumnOrder"
           @reset="resetColumns"
         />
         <BaseIconButton
@@ -140,6 +141,14 @@ function upstreamSendStateText(value: string | null | undefined) {
         :loading="loading"
         empty-text="当前时段没有错误"
       >
+        <template #clientApiKeyName="{ displayValue }">
+          <span
+            class="block max-w-full truncate font-mono text-cp-sm font-bold text-cp-text"
+            :title="String(displayValue)"
+          >
+            {{ displayValue }}
+          </span>
+        </template>
         <template #provider="{ row }">
           <ProviderIconGroup
             :provider="String(row.provider || '')"
