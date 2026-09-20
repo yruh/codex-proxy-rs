@@ -36,11 +36,11 @@ const error = ref('')
 let revision = 0
 const options = computed(() => props.accounts.map(account => ({ label: account.name, value: account.id })))
 const columns: BaseTableColumn<Cycle>[] = [
-  { key: 'start', label: '额度周期 · 北京时间', size: '3xl' },
-  { key: 'usedPercent', label: '最后观测用量', size: 'xl' },
-  { key: 'tokens', label: '已记录 Tokens', kind: 'numeric', size: 'xl' },
-  { key: 'usd', label: '原价 USD', kind: 'numeric', size: 'lg' },
-  { key: 'pricedUsd', label: '当前倍率折算 USD', kind: 'numeric', size: 'xl' },
+  { key: 'start', label: '额度周期 · 北京时间', size: '2xl' },
+  { key: 'usedPercent', label: '最后观测用量', size: 'lg' },
+  { key: 'tokens', label: '已记录 Tokens', kind: 'numeric', size: 'lg' },
+  { key: 'usd', label: '原价 USD', kind: 'numeric', size: 'md' },
+  { key: 'pricedUsd', label: '倍率折算 USD', kind: 'numeric', size: 'lg' },
   { key: 'actions', label: '明细', kind: 'actions', size: 'sm' },
 ]
 const date = (value: string) => new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
@@ -91,13 +91,13 @@ watch(() => props.pricingRevision, () => void load())
     </p>
     <BaseTable :columns="columns" :rows="rows" :row-key="row => `${row.start}:${row.resetAt}`" :loading="busy" empty-text="尚无可确认的周额度周期，刷新上游额度后重试">
       <template #start="{ row }">
-        <p class="font-medium">
+        <p class="whitespace-normal font-medium">
           {{ date(row.start) }} — {{ row.current ? '至今' : date(row.end) }}
         </p>
         <p class="mt-1 text-xs text-cp-text-tertiary">
           {{ row.current ? '当前周期' : '历史周期' }} · {{ row.requests.toLocaleString() }} 次响应
         </p>
-        <p v-if="row.uncertainAfter" class="mt-1 text-xs text-cp-warning-text">
+        <p v-if="row.uncertainAfter" class="mt-1 whitespace-normal text-xs text-cp-warning-text">
           {{ row.boundary === 'observed_reset' ? '观测到额度回落' : '提前换窗或额度调整' }}：{{ date(row.uncertainAfter) }} 至 {{ date(row.start) }}，按首次新观测分段
         </p>
       </template>

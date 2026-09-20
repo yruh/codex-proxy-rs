@@ -245,7 +245,7 @@ onMounted(() => action(load))
         </p>
       </BaseCard>
     </div>
-    <BaseCard title="用量趋势" :description="`${days === 0 ? '当前周限 · 各账号实际周期' : `${days} 天内`} · ${activeDays} 个活跃日`">
+    <BaseCard title="用量趋势" :description="`${historicalRange ? '所选历史周期' : days === 0 ? '当前周限 · 各账号实际周期' : `${days} 天内`} · ${activeDays} 个活跃日`">
       <template #actions>
         <BaseSelect v-model="metric" :options="[{ label: 'Tokens', value: 'tokens' }, { label: 'API 等价 USD', value: 'cost' }, { label: '响应次数', value: 'requests' }]" aria-label="趋势指标" />
       </template>
