@@ -30,7 +30,10 @@ async fn quota_cycle_history_captures_changes_and_isolates_accounts() {
         .unwrap();
     assert_eq!(history.len(), 3);
     assert!(history.iter().all(|record| record.snapshot));
-    assert_eq!(history[1].observed_at, at + TimeDelta::hours(1));
+    assert_eq!(
+        history[1].observed_at.timestamp_micros(),
+        (at + TimeDelta::hours(1)).timestamp_micros()
+    );
     sqlx::query("update provider_accounts set upstream_user_id='changed-user' where id='cycle_a'")
         .execute(&database.pool)
         .await
