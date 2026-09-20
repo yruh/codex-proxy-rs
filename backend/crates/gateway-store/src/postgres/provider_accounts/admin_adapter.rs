@@ -504,6 +504,13 @@ impl AccountStore for PgAdminAccountStore {
         super::quota_forecast::load_history(&self.pool, &self.query_budget, window).await
     }
 
+    async fn load_quota_history_documents(
+        &self,
+        account_id: &str,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::quota_forecast::QuotaHistoryDocument>> {
+        super::quota_forecast::load_documents(&self.pool, &self.query_budget, account_id).await
+    }
+
     async fn credential_details(
         &self,
         provider_kind: &ProviderKind,

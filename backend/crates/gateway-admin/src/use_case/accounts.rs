@@ -104,6 +104,11 @@ pub trait AccountsService: Send + Sync {
         account_id: &ProviderAccountId,
     ) -> Result<AccountQuotaForecastReport, AdminError>;
 
+    async fn quota_cycles(
+        &self,
+        account_id: &ProviderAccountId,
+    ) -> Result<Vec<crate::model::quota_forecast::AccountQuotaCycle>, AdminError>;
+
     async fn personal_info(
         &self,
         _account_id: &ProviderAccountId,
@@ -673,6 +678,77 @@ impl AccountsService for DefaultAccountsService {
         refresh: bool,
     ) -> Result<AccountDirectoryItem, AdminError> {
         self.load_directory_item(account_id, refresh).await
+    }
+
+    async fn quota_cycles(
+        &self,
+        account_id: &ProviderAccountId,
+    ) -> Result<Vec<crate::model::quota_forecast::AccountQuotaCycle>, AdminError> {
+        let (_, provider) = self.provider_for_account(account_id).await?;
+        let current = provider
+            .quota(ProviderQuotaRequest {
+                account_id: account_id.clone(),
+                refresh: false,
+                rolling_usage: None,
+            })
+            .await
+            .map_err(|error| map_provider_error(error, "quota cycle snapshot"))?;
+        let documents = self
+            .accounts
+            .load_quota_history_documents(account_id.as_str())
+            .await
+            .map_err(|error| map_store_error(error, "quota cycle history"))?;
+        let mut observations = Vec::new();
+        for record in documents {
+            if record.snapshot {
+                if let Some(quota) =
+                    provider.historical_quota(account_id, &record.document, record.observed_at)
+                {
+                    observations.push(quota);
+                }
+            } else {
+                let mut quota = current.clone();
+                quota.observed_at = Some(record.observed_at);
+                quota.windows = current
+                    .windows
+                    .iter()
+                    .filter_map(|window| {
+                        let fact = provider.quota_forecast_observation(&record.document, window)?;
+                        let mut observed = window.clone();
+                        observed.reset_at = Some(fact.reset_at);
+                        observed.used_percent = Some(fact.used_percent);
+                        Some(observed)
+                    })
+                    .collect();
+                observations.push(quota);
+            }
+        }
+        observations.push(current);
+        let now = Utc::now();
+        let mut cycles = crate::model::quota_forecast::quota_cycles(observations, now);
+        // 历史只展示留有上游边界的周期，不按今天的 reset 倒推出不存在的往期。
+        cycles.reverse();
+        cycles.truncate(16);
+        for cycle in &mut cycles {
+            let history = self
+                .accounts
+                .load_quota_forecast_history(&AccountUsageWindowQuery {
+                    account_id: account_id.to_string(),
+                    key: "weekly-history".to_owned(),
+                    range: TimeRange {
+                        start: cycle.start,
+                        end: cycle.end,
+                    },
+                })
+                .await
+                .map_err(|error| map_store_error(error, "quota cycle usage"))?;
+            cycle.requests = history.usage.request_count;
+            cycle.tokens = history.usage.tokens;
+            cycle.usd = history.usage.usd;
+            cycle.priced_usd = history.usage.priced_usd.unwrap_or(history.usage.usd);
+            cycle.incomplete_cost = history.usage.unavailable_cost_count > 0;
+        }
+        Ok(cycles)
     }
 
     async fn quota_forecast(

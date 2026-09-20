@@ -336,6 +336,81 @@ fn entirely_unknown_costs_leave_only_money_estimates_unavailable() {
     assert_eq!(week.remaining_usd, None);
 }
 
+fn cycle_observation(day: i64, reset_day: i64, used: f64) -> ProviderQuota {
+    let mut window = window("codex-weekly", 7);
+    window.reset_at = Some(now() + Duration::days(reset_day));
+    window.used_percent = Some(used);
+    let mut result = quota(vec![window]);
+    result.observed_at = Some(now() + Duration::days(day));
+    result
+}
+
+#[test]
+fn history_keeps_scheduled_weeks_separate_without_inventing_missing_weeks() {
+    let cycles = gateway_admin::model::quota_forecast::quota_cycles(
+        vec![
+            cycle_observation(-12, -7, 60.0),
+            cycle_observation(-6, 0, 10.0),
+            cycle_observation(1, 7, 2.0),
+        ],
+        now() + Duration::days(2),
+    );
+    assert_eq!(cycles.len(), 3);
+    assert_eq!(cycles[0].end, cycles[1].start);
+    assert_eq!(cycles[1].end, cycles[2].start);
+    assert!(!cycles[0].current);
+    assert!(cycles[2].current);
+    assert_eq!(cycles[2].end, now() + Duration::days(2));
+}
+
+#[test]
+fn history_requires_two_lower_observations_for_same_reset_and_marks_uncertainty() {
+    let cycles = gateway_admin::model::quota_forecast::quota_cycles(
+        vec![
+            cycle_observation(-3, 1, 80.0),
+            cycle_observation(-2, 1, 0.0),
+            cycle_observation(-1, 1, 3.0),
+        ],
+        now(),
+    );
+    assert_eq!(cycles.len(), 2);
+    assert_eq!(cycles[0].end, now() - Duration::days(2));
+    assert_eq!(cycles[1].start, cycles[0].end);
+    assert_eq!(cycles[1].boundary, "observed_reset");
+    assert_eq!(cycles[1].uncertain_after, Some(now() - Duration::days(3)));
+}
+
+#[test]
+fn history_ignores_isolated_drop_and_second_level_reset_jitter() {
+    let mut last = cycle_observation(-1, 1, 81.0);
+    last.windows[0].reset_at = Some(now() + Duration::days(1) + Duration::seconds(1));
+    let cycles = gateway_admin::model::quota_forecast::quota_cycles(
+        vec![
+            cycle_observation(-3, 1, 80.0),
+            cycle_observation(-2, 1, 0.0),
+            last,
+        ],
+        now(),
+    );
+    assert_eq!(cycles.len(), 1);
+    assert_eq!(cycles[0].used_percent, 81.0);
+}
+
+#[test]
+fn history_clips_early_changed_windows_without_overlapping_usage() {
+    let cycles = gateway_admin::model::quota_forecast::quota_cycles(
+        vec![
+            cycle_observation(-3, 1, 80.0),
+            cycle_observation(-2, 4, 0.0),
+        ],
+        now(),
+    );
+    assert_eq!(cycles.len(), 2);
+    assert_eq!(cycles[0].end, cycles[1].start);
+    assert_eq!(cycles[1].boundary, "window_changed");
+    assert_eq!(cycles[1].start, now() - Duration::days(2));
+}
+
 #[test]
 fn pricing_estimates_preserve_original_capacity_and_use_weighted_sample() {
     let source = quota(vec![window("week", 7)]);

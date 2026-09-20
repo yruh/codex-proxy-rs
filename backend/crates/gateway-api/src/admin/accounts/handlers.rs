@@ -26,6 +26,10 @@ where
         )
         .route("/api/admin/accounts/quota", get(account_quota::<S>))
         .route(
+            "/api/admin/accounts/quota-cycles",
+            get(account_quota_cycles::<S>),
+        )
+        .route(
             "/api/admin/accounts/personal-info",
             get(account_personal_info::<S>),
         )
@@ -376,6 +380,26 @@ where
         account: account_view(result, Utc::now()),
     };
     Ok(AdminResponse::new(StatusCode::OK, AdminEnvelope::ok(data)))
+}
+
+async fn account_quota_cycles<S>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+    AdminQuery(query): AdminQuery<AccountIdQuery>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let account_id = query.into_id().map_err(map_wire_error)?;
+    let items = state
+        .admin_services()
+        .accounts()
+        .quota_cycles(&account_id)
+        .await
+        .map_err(map_service_error)?;
+    Ok(axum::Json(AdminEnvelope::ok(
+        serde_json::json!({"items": items}),
+    )))
 }
 
 async fn account_quota_forecast<S>(

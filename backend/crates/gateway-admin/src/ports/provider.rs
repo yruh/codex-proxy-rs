@@ -211,6 +211,16 @@ pub trait ProviderAdmin: Send + Sync {
         request: ProviderQuotaRequest,
     ) -> Result<ProviderQuota, ProviderAdminError>;
 
+    /// 由 Provider 复用自身快照解析器解释历史额度，不暴露原始文档给管理端。
+    fn historical_quota(
+        &self,
+        _account_id: &gateway_core::account::ProviderAccountId,
+        _document: &ProviderDocument,
+        _observed_at: chrono::DateTime<chrono::Utc>,
+    ) -> Option<ProviderQuota> {
+        None
+    }
+
     /// 历史观测的协议字段仅由具体 Provider 解释；不支持时保留累计估算。
     fn quota_forecast_observation(
         &self,

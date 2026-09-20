@@ -6,6 +6,46 @@ use gateway_store::postgres::{
 };
 
 #[tokio::test]
+async fn quota_cycle_history_captures_changes_and_isolates_accounts() {
+    let Some(database) = TestDatabase::create("quota_cycles").await else {
+        return;
+    };
+    let repo = PgProviderAccountRepository::new(database.pool.clone());
+    for id in ["cycle_a", "cycle_b"] {
+        repo.insert_provider_account(account(id, id)).await.unwrap();
+    }
+    let at = Utc::now() - TimeDelta::hours(4);
+    for (id, hour, used) in [
+        ("cycle_a", 0, 70),
+        ("cycle_a", 1, 0),
+        ("cycle_a", 2, 3),
+        ("cycle_b", 0, 90),
+    ] {
+        sqlx::query("update provider_accounts set provider_quota_json=jsonb_build_object('used', $2::int), quota_observed_at=$3, updated_at=now() where id=$1")
+            .bind(id).bind(used).bind(at + TimeDelta::hours(hour)).execute(&database.pool).await.unwrap();
+    }
+    let history = admin_account_store(&database.pool)
+        .load_quota_history_documents("cycle_a")
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 3);
+    assert!(history.iter().all(|record| record.snapshot));
+    assert_eq!(history[1].observed_at, at + TimeDelta::hours(1));
+    sqlx::query("update provider_accounts set upstream_user_id='changed-user' where id='cycle_a'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    assert!(
+        admin_account_store(&database.pool)
+            .load_quota_history_documents("cycle_a")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    database.close().await;
+}
+
+#[tokio::test]
 async fn quota_forecast_combines_local_usage_at_matching_observation_boundaries() {
     let Some(database) = TestDatabase::create("forecast_dual").await else {
         return;

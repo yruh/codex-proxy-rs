@@ -649,6 +649,22 @@ impl ProviderAdmin for OpenAiAdminProvider {
         Ok(project_quota(snapshot, &account))
     }
 
+    fn historical_quota(
+        &self,
+        account_id: &ProviderAccountId,
+        document: &ProviderDocument,
+        observed_at: DateTime<Utc>,
+    ) -> Option<ProviderQuota> {
+        crate::credential::parse_account_quota_snapshot(
+            account_id.clone(),
+            CredentialRevision::new(1).ok()?,
+            observed_at.into(),
+            &Value::Object(document.expose_to_provider().expose_to_provider().clone()),
+        )
+        .ok()
+        .map(project_quota_snapshot)
+    }
+
     fn quota_forecast_observation(
         &self,
         document: &ProviderDocument,

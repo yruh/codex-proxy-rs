@@ -117,6 +117,13 @@ pub trait AccountStore: Send + Sync {
         window: &AccountUsageWindowQuery,
     ) -> AdminStoreResult<QuotaForecastHistory>;
 
+    async fn load_quota_history_documents(
+        &self,
+        _account_id: &str,
+    ) -> AdminStoreResult<Vec<crate::model::quota_forecast::QuotaHistoryDocument>> {
+        Ok(Vec::new())
+    }
+
     async fn credential_details(
         &self,
         provider_kind: &gateway_core::routing::ProviderKind,

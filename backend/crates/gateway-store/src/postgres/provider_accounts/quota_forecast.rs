@@ -7,6 +7,46 @@ use gateway_admin::model::quota_forecast_sampling::{
 
 use super::*;
 
+pub(super) async fn load_documents(
+    pool: &PgPool,
+    budget: &super::super::ObservabilityQueryBudget,
+    account_id: &str,
+) -> AdminStoreResult<Vec<gateway_admin::model::quota_forecast::QuotaHistoryDocument>> {
+    // 每小时取最后一份原始观测，保留跨周覆盖，避免高频请求挤掉全部旧周期。
+    let rows = budget.run("load quota cycle observations", async { sqlx::query(
+        "select observed_at, document, snapshot from (
+            (select distinct on (date_trunc('hour', h.observed_at)) h.observed_at, h.document, true as snapshot
+              from account_quota_history h join provider_accounts a on a.id = h.account_id
+              where h.account_id = $1 and h.observed_at >= now() - interval '120 days'
+                and h.upstream_account_id is not distinct from a.upstream_account_id
+                and h.upstream_user_id is not distinct from a.upstream_user_id
+                and octet_length(h.document::text) <= 16384
+              order by date_trunc('hour', h.observed_at), h.observed_at desc limit 3000)
+            union all
+            (select distinct on (date_trunc('hour', completed_at)) completed_at, provider_observation_json, false from model_requests
+              where provider_account_ref = $1 and completed_at >= now() - interval '120 days'
+                and provider_observation_json is not null
+                and octet_length(provider_observation_json::text) <= 16384
+                and completed_at < coalesce((select min(observed_at) from account_quota_history where account_id = $1), now())
+              order by date_trunc('hour', completed_at), completed_at desc limit 3000)
+         ) observations order by observed_at"
+    ).bind(account_id).fetch_all(pool).await
+        .map_err(|_| postgres_unavailable("load quota cycle observations")) })
+        .await.map_err(|error| admin_store_error(ENTITY, error))?;
+    rows.iter()
+        .map(|row| {
+            let document = window_usage_value::<
+                sqlx::types::Json<serde_json::Map<String, serde_json::Value>>,
+            >(row, "document")?;
+            Ok(gateway_admin::model::quota_forecast::QuotaHistoryDocument {
+                observed_at: window_usage_value(row, "observed_at")?,
+                snapshot: window_usage_value(row, "snapshot")?,
+                document: ProviderDocument::new(OpaqueProviderData::new(document.0)),
+            })
+        })
+        .collect()
+}
+
 pub(super) async fn load_history(
     pool: &PgPool,
     budget: &super::super::ObservabilityQueryBudget,

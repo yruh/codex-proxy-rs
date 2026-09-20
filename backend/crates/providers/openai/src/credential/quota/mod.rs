@@ -52,9 +52,9 @@ use document::{
 };
 use evidence::{QuotaEndpointFailure, classify_quota_endpoint_failure};
 use recovery::{RECOVERY_FIELD, reconcile_refresh};
+pub(crate) use snapshot::parse_account_quota_snapshot;
 use snapshot::{
-    parse_account_quota_snapshot, quota_projection_ttl, quota_snapshot_from_observation,
-    scheduling_signals_from_snapshot,
+    quota_projection_ttl, quota_snapshot_from_observation, scheduling_signals_from_snapshot,
 };
 
 const DEFAULT_RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(60);

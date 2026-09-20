@@ -3,7 +3,7 @@ import type { Account, AccountQuotaWindow } from '@/api/modules/accounts'
 import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
 import { Download, Laptop, Plus, RefreshCw, Server, Sigma } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
-import { getAccountQuotaForecast, getAccounts } from '@/api/modules/accounts'
+import { getAccounts } from '@/api/modules/accounts'
 import { portalRequest } from '@/api/modules/portal'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -14,6 +14,7 @@ import BasePageHeader from '@/components/base/BasePageHeader.vue'
 import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
 import PricingSummary from '../portal-users/PricingSummary.vue'
+import WeeklyHistory from './components/WeeklyHistory.vue'
 import WeeklyQuotaCard from './components/WeeklyQuotaCard.vue'
 
 interface Daily { day: string, source: string, requests: number, inputTokens: string, outputTokens: string, cachedTokens: string, estimatedUsd: string | null, pricedRequests: number }
@@ -34,6 +35,7 @@ const devices = ref<Device[]>([])
 const accounts = ref<Account[]>([])
 const accountId = ref('')
 const days = ref(7)
+const historicalRange = ref<{ accountId: string, start: string, end: string } | null>(null)
 const rangeStart = ref(new Date())
 const remainingPercent = (window: AccountQuotaWindow) => window.usedPercent === null || (window.resetAt && new Date(window.resetAt).getTime() <= Date.now()) ? null : Math.max(0, Math.min(100, 100 - window.usedPercent))
 const label = (source: string) => ({ local: '本地直连', proxy: '服务器代理', all: '合计' })[source] || source
@@ -41,10 +43,10 @@ const sourceFilter = ref('all')
 const selectedDay = ref('')
 const metric = ref<'tokens' | 'cost' | 'requests'>('tokens')
 const dayKey = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
-const calendarDays = computed(() => days.value || Math.max(1, Math.ceil((Date.now() - new Date(`${dayKey(rangeStart.value)}T00:00:00+08:00`).getTime()) / 86400000)))
+const calendarDays = computed(() => days.value || Math.max(1, Math.ceil(((historicalRange.value ? new Date(historicalRange.value.end).getTime() : Date.now()) - new Date(`${dayKey(rangeStart.value)}T00:00:00+08:00`).getTime()) / 86400000)))
 const filteredRows = computed(() => rows.value.filter(r => (sourceFilter.value === 'all' || r.source === sourceFilter.value) && (!selectedDay.value || r.day === selectedDay.value)))
 const calendar = computed(() => {
-  const today = new Date(`${dayKey(new Date())}T00:00:00+08:00`)
+  const today = new Date(`${dayKey(historicalRange.value ? new Date(new Date(historicalRange.value.end).getTime() - 1) : new Date())}T00:00:00+08:00`)
   return Array.from({ length: calendarDays.value }, (_, i) => {
     const day = dayKey(new Date(today.getTime() - (calendarDays.value - 1 - i) * 86400000))
     const values = rows.value.filter(r => r.day === day && (sourceFilter.value === 'all' || r.source === sourceFilter.value))
@@ -102,16 +104,19 @@ async function load() {
   rows.value = []
   await loadAccounts()
   let ranges = [{ id: accountId.value, start: new Date(new Date(`${dayKey(end)}T00:00:00+08:00`).getTime() - (days.value - 1) * 86400000), end }]
-  if (days.value === 0) {
+  if (historicalRange.value) {
+    ranges = [{ id: historicalRange.value.accountId, start: new Date(historicalRange.value.start), end: new Date(historicalRange.value.end) }]
+  }
+  else if (days.value === 0) {
     if (!weeklyAccounts.value.length)
       throw new Error('当前周限仅支持有上游周额度的 OpenAI OAuth 账号；API Key 账号请按日期查看用量')
     ranges = await Promise.all(weeklyAccounts.value.map(async (account) => {
-      const data = await getAccountQuotaForecast({ accountId: account.id })
-      const forecast = data.forecasts.find(item => item.period === 'weekly' && !item.extrapolated)
-      const reset = new Date(forecast?.source?.resetAt || '')
-      if (!forecast || !Number.isFinite(reset.getTime()) || reset <= end)
+      const data = await portalRequest<{ items: { current: boolean, start: string, resetAt: string }[] }>(`/api/admin/accounts/quota-cycles?accountId=${encodeURIComponent(account.id)}`)
+      const cycle = data.items.find(item => item.current)
+      const reset = new Date(cycle?.resetAt || '')
+      if (!cycle || !Number.isFinite(reset.getTime()) || reset <= end)
         throw new Error(`${account.name} 缺少当前周限边界，请刷新上游额度后重试`)
-      const start = new Date(reset.getTime() - forecast.targetDays * 86400000)
+      const start = new Date(cycle.start)
       if (start > end)
         throw new Error(`${account.name} 周限边界无效`)
       return { id: account.id, start, end }
@@ -155,6 +160,14 @@ async function action(work: () => Promise<void>) {
   catch (e) { error.value = e instanceof Error ? e.message : '查询失败' }
   finally { busy.value = false }
 }
+function selectHistory(range: { accountId: string, start: string, end: string }) {
+  if (busy.value)
+    return
+  historicalRange.value = range
+  accountId.value = range.accountId
+  days.value = 0
+  void action(load)
+}
 async function create() {
   await action(async () => {
     if (!deviceAccount.value)
@@ -194,10 +207,10 @@ onMounted(() => action(load))
     <BaseCard padding="compact">
       <div class="flex flex-wrap items-end gap-3">
         <FormItem label="上游账号" class="min-w-48 flex-1">
-          <BaseSelect v-model="accountId" :disabled="busy" :options="[{ label: '全部账号', value: '' }, ...accounts.map(a => ({ label: a.name, value: a.id }))]" @update:model-value="action(load)" />
+          <BaseSelect v-model="accountId" :disabled="busy" :options="[{ label: '全部账号', value: '' }, ...accounts.map(a => ({ label: a.name, value: a.id }))]" @update:model-value="historicalRange = null; action(load)" />
         </FormItem>
         <FormItem label="时间范围" class="min-w-36">
-          <BaseSelect :model-value="String(days)" :disabled="busy" :options="[{ label: '当前周限', value: '0' }, { label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }, { label: '最近一年', value: '365' }]" @update:model-value="days = Number($event); action(load)" />
+          <BaseSelect :model-value="historicalRange ? 'history' : String(days)" :disabled="busy" :options="[...(historicalRange ? [{ label: '所选历史周期', value: 'history' }] : []), { label: '当前周限', value: '0' }, { label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }, { label: '最近一年', value: '365' }]" @update:model-value="historicalRange = null; days = Number($event); action(load)" />
         </FormItem>
         <FormItem label="数据来源" class="min-w-40">
           <BaseSelect v-model="sourceFilter" :options="[{ label: '双端合计', value: 'all' }, { label: '本地直连', value: 'local' }, { label: '服务器代理', value: 'proxy' }]" />
@@ -207,10 +220,14 @@ onMounted(() => action(load))
         </p>
       </div>
     </BaseCard>
-    <p v-if="days === 0" class="text-xs text-cp-text-secondary">
+    <p v-if="historicalRange" class="text-xs text-cp-text-secondary">
+      历史周期：{{ new Date(historicalRange.start).toLocaleString() }} — {{ new Date(historicalRange.end).toLocaleString() }}
+    </p>
+    <p v-else-if="days === 0" class="text-xs text-cp-text-secondary">
       当前周限：按各 OpenAI OAuth 账号实际重置周期分别统计至今，再合并；不按自然周计算，不含无周限的 API Key 账号。
     </p>
     <PricingSummary @saved="pricingRevision++" />
+    <WeeklyHistory :accounts="accounts.filter(a => a.provider === 'openai' && a.authenticationKind !== 'api_key')" :pricing-revision="pricingRevision" @select="selectHistory" @account-updated="updateAccount" />
     <WeeklyQuotaCard v-for="account in weeklyAccounts" :key="account.id" :account="account" :pricing-revision="pricingRevision" @account-updated="updateAccount" />
     <div class="grid gap-4 md:grid-cols-3">
       <BaseCard v-for="card in cards" :key="card.source">

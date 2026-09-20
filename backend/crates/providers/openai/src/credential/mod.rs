@@ -22,6 +22,7 @@ pub(crate) use affinity::{
     derive_previous_response_id_hash,
 };
 pub(crate) use oauth::oauth_owner_ref;
+pub(crate) use quota::parse_account_quota_snapshot;
 pub(crate) use types::parse_access_token_expiration;
 
 pub use api_key::{

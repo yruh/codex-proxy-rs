@@ -9,6 +9,120 @@ const DAY_SECONDS: u64 = 86_400;
 const MIN_USED_PERCENT: f64 = 5.0;
 const LOW_SAMPLE_PERCENT: f64 = 10.0;
 
+/// 历史配额只保存观测事实，不把观测间的重置时间伪装成精确时间。
+#[derive(Debug, Clone)]
+pub struct QuotaHistoryDocument {
+    pub observed_at: DateTime<Utc>,
+    pub document: super::provider_credentials::ProviderDocument,
+    pub snapshot: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountQuotaCycle {
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub reset_at: DateTime<Utc>,
+    pub observed_at: DateTime<Utc>,
+    pub used_percent: f64,
+    pub boundary: String,
+    pub uncertain_after: Option<DateTime<Utc>>,
+    pub current: bool,
+    pub requests: u64,
+    pub tokens: u64,
+    pub usd: f64,
+    pub priced_usd: f64,
+    pub incomplete_cost: bool,
+}
+
+/// 同一周窗口的低读数需后续观测确认；单次乱序或百分比抖动不切周期。
+#[must_use]
+pub fn quota_cycles(
+    mut observations: Vec<ProviderQuota>,
+    now: DateTime<Utc>,
+) -> Vec<AccountQuotaCycle> {
+    observations.sort_by_key(|q| q.observed_at);
+    let mut cycles: Vec<AccountQuotaCycle> = Vec::new();
+    let mut pending_drop: Option<(DateTime<Utc>, f64)> = None;
+    for quota in observations {
+        let Some(at) = quota.observed_at.filter(|at| *at <= now) else {
+            continue;
+        };
+        let Some((window, _)) = quota
+            .usage_windows()
+            .find(|(_, period)| *period == AccountUsagePeriod::Weekly)
+        else {
+            continue;
+        };
+        let (Some(reset), Some(used)) = (window.reset_at, window.used_percent) else {
+            continue;
+        };
+        if reset <= at || !used.is_finite() || !(0.0..=100.0).contains(&used) {
+            continue;
+        }
+        let nominal_start = reset - Duration::days(7);
+        if nominal_start >= at {
+            continue;
+        }
+        let mut start = nominal_start;
+        let mut boundary = "scheduled";
+        let mut uncertain_after = None;
+        if let Some(previous) = cycles.last_mut() {
+            if at <= previous.observed_at {
+                continue;
+            }
+            let changed = (reset - previous.reset_at).abs() > Duration::seconds(2);
+            if !changed && used + 1.0 < previous.used_percent {
+                if let Some((first_low_at, _)) = pending_drop {
+                    start = first_low_at;
+                    boundary = "observed_reset";
+                    uncertain_after = Some(previous.observed_at);
+                } else {
+                    pending_drop = Some((at, used));
+                    continue;
+                }
+            } else if changed {
+                // 正常换周的边界由上游 reset 给出；提前换桶只能定位到两次观测之间。
+                if nominal_start < previous.reset_at - Duration::seconds(2) {
+                    start = at;
+                    boundary = "window_changed";
+                    uncertain_after = Some(previous.observed_at);
+                } else {
+                    start = nominal_start.max(previous.reset_at);
+                }
+            } else {
+                pending_drop = None;
+                previous.observed_at = at;
+                previous.used_percent = used;
+                continue;
+            }
+            pending_drop = None;
+            previous.end = previous.end.min(start);
+            previous.current = false;
+        }
+        if start >= reset || start > now {
+            continue;
+        }
+        cycles.push(AccountQuotaCycle {
+            start,
+            end: reset.min(now),
+            reset_at: reset,
+            observed_at: at,
+            used_percent: used,
+            boundary: boundary.to_owned(),
+            uncertain_after,
+            current: reset > now,
+            requests: 0,
+            tokens: 0,
+            usd: 0.0,
+            priced_usd: 0.0,
+            incomplete_cost: false,
+        });
+    }
+    cycles.retain(|cycle| cycle.end > cycle.start);
+    cycles
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountQuotaForecastReport {
     pub account_id: String,
