@@ -95,6 +95,7 @@ pub struct UsageListRecordView {
     pub account_id: Option<String>,
     pub account_email: Option<String>,
     pub account_name: Option<String>,
+    pub account_notes: Option<String>,
     pub route: String,
     pub model: Option<String>,
     pub requested_model: Option<String>,
@@ -427,7 +428,7 @@ pub struct DashboardPoolSummaryView {
 #[serde(rename_all = "camelCase")]
 pub struct DashboardCapacityInfoView {
     pub max_concurrent_per_account: u64,
-    pub total_slots: u64,
+    pub total_slots: Option<u64>,
     pub used_slots: Option<u64>,
     pub available_slots: Option<u64>,
 }

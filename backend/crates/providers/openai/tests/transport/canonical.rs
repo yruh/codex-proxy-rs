@@ -296,7 +296,8 @@ fn decoder_should_bill_the_sent_model_independently_of_the_response_model() {
         ("gpt-5.6-sol", Some("gpt-6-astra"), Some(6_875_000)),
         ("gpt-5.6-sol", Some("gpt-5.6-sol"), Some(6_875_000)),
         ("gpt-5.6-sol", None, Some(6_875_000)),
-        ("gpt-6-sol", Some("gpt-5.6-sol"), None),
+        ("gpt-6-sol", Some("gpt-5.6-sol"), Some(2_550_000)),
+        ("unknown-model", Some("gpt-6-sol"), None),
     ] {
         let created =
             json!({"type":"response.created","response":{"id":"resp_model_cost","model":returned}});

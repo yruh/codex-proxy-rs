@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Account } from '@/api/modules/accounts'
-import { useNow } from '@vueuse/core'
+import { useIntervalFn, useNow } from '@vueuse/core'
 import { computed, ref, toRef, watch } from 'vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseCard from '@/components/base/BaseCard.vue'
@@ -9,7 +9,7 @@ import { useAccountQuotaForecast } from '../../accounts/composables/useAccountQu
 const props = defineProps<{ account: Account, pricingRevision?: number }>()
 const emit = defineEmits<{ accountUpdated: [account: Account] }>()
 const { report, loading, refreshing, error, load, refresh } = useAccountQuotaForecast(toRef(() => props.account.id), ref(true), account => emit('accountUpdated', account))
-const now = useNow({ interval: 30_000 })
+const now = useNow({ scheduler: callback => useIntervalFn(callback, 30_000) })
 const forecast = computed(() => report.value?.forecasts.find(f => f.period === 'weekly' && !f.extrapolated))
 const expired = computed(() => Boolean(forecast.value?.source && new Date(forecast.value.source.resetAt) <= now.value))
 const used = computed(() => expired.value ? null : forecast.value?.source?.usedPercent ?? null)

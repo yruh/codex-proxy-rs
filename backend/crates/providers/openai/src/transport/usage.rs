@@ -232,6 +232,27 @@ struct PricingRule {
 // 已按 https://developers.openai.com/api/docs/deprecations 核验至 2026-09-13，
 // 移除已关闭的型号；仅宣布弃用但尚未到关闭日期的型号继续保留。
 const PRICING_RULES: &[PricingRule] = &[
+    // GPT-6 Sol / Luna：2026-09-23 核对官方标准、Flex、Fast 与长上下文价格。
+    PricingRule {
+        model: "gpt-6-sol",
+        pricing: ModelPricing::new(20000, 100000, 2000)
+            .with_cache_write(125)
+            .with_flex(10000, 50000, 1000)
+            .with_fast(40000, 200000, 4000)
+            .with_long(40000, 150000, 4000)
+            .with_long_flex(20000, 75000, 2000)
+            .with_long_fast(80000, 300000, 8000),
+    },
+    PricingRule {
+        model: "gpt-6-luna",
+        pricing: ModelPricing::new(1000, 5000, 100)
+            .with_cache_write(125)
+            .with_flex(500, 2500, 50)
+            .with_fast(2000, 10000, 200)
+            .with_long(2000, 7500, 200)
+            .with_long_flex(1000, 3750, 100)
+            .with_long_fast(4000, 15000, 400),
+    },
     // Astra：https://developers.openai.com/api/docs/models/gpt-6-astra
     // 已于 2026-09-09 对照官方价目表核验。
     PricingRule {

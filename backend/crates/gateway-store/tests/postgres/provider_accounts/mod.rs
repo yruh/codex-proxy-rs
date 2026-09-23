@@ -5,6 +5,7 @@ use std::{
 };
 
 mod quota_forecast;
+mod timestamps;
 
 use chrono::{TimeDelta, Utc};
 use gateway_admin::{
@@ -1519,7 +1520,7 @@ async fn invalid_account_notes_roll_back_scheduling_revision_and_audit() {
 }
 
 #[tokio::test]
-async fn account_recovery_resets_status_facts_without_changing_credentials_or_scheduling() {
+async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
     const GROUP_ID: &str = "grp_00000000000000000000000000000070";
     let Some(database) = TestDatabase::create("provider_account_recovery").await else {
         return;
@@ -1594,6 +1595,57 @@ async fn account_recovery_resets_status_facts_without_changing_credentials_or_sc
     .await
     .expect("load account before recovery");
     let store = admin_account_store(&database.pool);
+    let facts_query = "select to_jsonb(a) - 'enabled' - 'updated_at'
+                       from provider_accounts a where id = 'acct_recovery'";
+    let before_enable: serde_json::Value = sqlx::query_scalar(facts_query)
+        .fetch_one(&database.pool)
+        .await
+        .expect("load disabled account facts");
+
+    let enabled = store
+        .batch_update_accounts(
+            BatchUpdateAccounts {
+                account_ids: vec!["acct_recovery".to_owned()],
+                enabled: Some(true),
+                concurrency_limit: None,
+                weight: None,
+                model_access: None,
+                group_ids: None,
+                outbound_proxy: None,
+            },
+            &MutationContext {
+                actor: MutationActor::System,
+                request_id: "request_account_enable".to_owned(),
+            },
+        )
+        .await
+        .expect("enable account scheduling");
+
+    assert_eq!(enabled.config_revision.get(), 2);
+    assert!(
+        repository
+            .load_provider_account("acct_recovery")
+            .await
+            .unwrap()
+            .unwrap()
+            .summary
+            .enabled
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, serde_json::Value>(facts_query)
+            .fetch_one(&database.pool)
+            .await
+            .expect("load enabled account facts"),
+        before_enable
+    );
+    assert_eq!(
+        account_group_ids(&database.pool, "acct_recovery").await,
+        [GROUP_ID]
+    );
+    assert_eq!(
+        audit_count(&database.pool, "request_account_enable").await,
+        1
+    );
 
     let result = store
         .recover_account(
@@ -1606,7 +1658,7 @@ async fn account_recovery_resets_status_facts_without_changing_credentials_or_sc
         .await
         .expect("recover account");
 
-    assert_eq!(result.config_revision.get(), 2);
+    assert_eq!(result.config_revision.get(), 3);
     let current = sqlx::query_as::<_, RecoveredAccountRow>(
         "select enabled, credential_state, quota_access_state, quota_evidence,
                 last_error_message, provider_quota_json, concurrency_limit, weight,
@@ -3393,7 +3445,8 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
 }
 
 #[tokio::test]
-async fn adaptive_concurrency_uses_latest_locked_settings_without_overwriting_admin_fields() {
+async fn adaptive_concurrency_handles_unlimited_and_latest_locked_settings_without_overwriting_admin_fields()
+ {
     let Some(database) = TestDatabase::create("adaptive_concurrency").await else {
         return;
     };
@@ -3414,6 +3467,9 @@ async fn adaptive_concurrency_uses_latest_locked_settings_without_overwriting_ad
         (true, Some(2), 10, Some(2), false),
         (true, None, 2, None, false),
         (true, None, 10, Some(3), true),
+        (true, None, 0, Some(3), true),
+        (true, Some(2), 0, Some(2), false),
+        (false, None, 0, None, false),
     ] {
         let mut admin = database.pool.begin().await.expect("admin transaction");
         sqlx::query("update runtime_settings set max_concurrent_per_account = $1 where id = 1")
@@ -3468,6 +3524,9 @@ async fn adaptive_concurrency_uses_latest_locked_settings_without_overwriting_ad
     .fetch_all(&database.pool)
     .await
     .expect("audit");
-    assert_eq!(audited_fields, vec![vec!["concurrency_limit".to_owned()]]);
+    assert_eq!(
+        audited_fields,
+        vec![vec!["concurrency_limit".to_owned()]; 2]
+    );
     database.close().await;
 }

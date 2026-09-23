@@ -31,6 +31,46 @@ fn billing_usage(
 }
 
 #[test]
+fn gpt_6_sol_and_luna_prices_cover_tiers_and_context_boundary() {
+    for (model, base) in [
+        ("gpt-6-sol", [2.0, 0.2, 2.5, 10.0]),
+        ("gpt-6-luna", [0.1, 0.01, 0.125, 0.5]),
+    ] {
+        for (tier, tier_factor) in [
+            (None, 1.0),
+            (Some("flex"), 0.5),
+            (Some("fast"), 2.0),
+            (Some("priority"), 2.0),
+        ] {
+            for input in [272_000, 272_001] {
+                let bill =
+                    openai_billing_breakdown(model, billing_usage(input, 5, 20, 10), tier).unwrap();
+                let prices = [
+                    bill.input_price_per_million(),
+                    bill.cache_read_price_per_million(),
+                    bill.cache_write_price_per_million(),
+                    bill.output_price_per_million(),
+                ];
+                for (index, price) in prices.iter().enumerate() {
+                    let context_factor = if input <= 272_000 {
+                        1.0
+                    } else if index == 3 {
+                        1.5
+                    } else {
+                        2.0
+                    };
+                    let actual: f64 = price.amount().to_string().parse().unwrap();
+                    assert!(
+                        (actual - base[index] * tier_factor * context_factor).abs() < 1e-10,
+                        "{model} {tier:?} {input} component {index}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn astra_billing_should_preserve_components_across_tiers_and_context_boundary() {
     // USD per million tokens, in order: input, cache read, cache write, output.
     for (tier, input, expected, multiplier) in [

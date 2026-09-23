@@ -569,6 +569,8 @@ pub struct UsageListRecord {
     pub provider_account_ref: Option<String>,
     pub provider_account_name: Option<String>,
     pub provider_account_email: Option<String>,
+    /// 账号当前备注，按内部账号 ID 关联，不属于请求历史快照。
+    pub provider_account_notes: Option<String>,
     pub provider_account_authentication_kind: Option<String>,
     pub upstream_model_id: Option<String>,
     pub upstream_transport: Option<String>,
@@ -1005,7 +1007,8 @@ pub struct DashboardWireAttribute {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DashboardCapacity {
     pub max_concurrent_per_account: u64,
-    pub total_slots: u64,
+    /// `None` 表示可用账号池不限制并发。
+    pub total_slots: Option<u64>,
     pub used_slots: Option<u64>,
     pub available_slots: Option<u64>,
 }
