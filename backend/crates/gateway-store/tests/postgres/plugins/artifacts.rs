@@ -154,7 +154,7 @@ async fn artifact_acceptance_is_exact_and_idempotent() {
 
 #[tokio::test]
 async fn plugin_migration_preserves_main_settings_and_accepts_new_installations() {
-    let Some(database) = TestDatabase::create_through("plugin_upgrade_from_main", 17).await else {
+    let Some(database) = TestDatabase::create_through("plugin_upgrade_from_main", 25).await else {
         return;
     };
     initialize_revision(&database).await;
