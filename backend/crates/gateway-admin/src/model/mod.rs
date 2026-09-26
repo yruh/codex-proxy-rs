@@ -12,6 +12,8 @@ pub mod import_tasks;
 pub mod key_usage;
 pub mod local_usage;
 pub mod observability;
+pub mod plugin_client_keys;
+pub mod plugins;
 pub mod portal;
 pub mod pricing;
 pub mod provider_credentials;

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { BaseTablePagination as BaseTablePaginationState } from '@/components/base/BaseTable/pagination'
+import type { BaseTablePaginationState } from '@codex-proxy/ui'
+
+import { BaseButton, BaseCard, BaseCheckbox, BaseColorPicker, BaseEmpty, BaseForm, BaseFormItem, BaseIconButton, BaseInput, BaseMenuItem, BaseMotionIcon, BaseNumberInput, BasePopover, BaseRadio, BaseRange, BaseSegmented, BaseSelect, BaseSkeleton, BaseSwitch, BaseTable, BaseTablePagination, BaseTag, BaseTextarea, defineTableColumns } from '@codex-proxy/ui'
 
 import {
   Bell,
@@ -15,31 +17,6 @@ import {
   TriangleAlert,
 } from '@lucide/vue'
 import { shallowRef } from 'vue'
-
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import BaseCheckbox from '@/components/base/BaseCheckbox.vue'
-import BaseColorPicker from '@/components/base/BaseColorPicker/index.vue'
-import BaseEmpty from '@/components/base/BaseEmpty.vue'
-import FormItem from '@/components/base/BaseForm/FormItem.vue'
-import BaseForm from '@/components/base/BaseForm/index.vue'
-import BaseIconButton from '@/components/base/BaseIconButton.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseMenuItem from '@/components/base/BaseMenuItem.vue'
-import BaseMotionIcon from '@/components/base/BaseMotionIcon.vue'
-import BaseNumberInput from '@/components/base/BaseNumberInput.vue'
-import BasePopover from '@/components/base/BasePopover.vue'
-import BaseRadio from '@/components/base/BaseRadio.vue'
-import BaseRange from '@/components/base/BaseRange.vue'
-import BaseSegmented from '@/components/base/BaseSegmented.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
-import BaseSwitch from '@/components/base/BaseSwitch.vue'
-import BaseTablePagination from '@/components/base/BaseTable/BaseTablePagination.vue'
-import { defineTableColumns } from '@/components/base/BaseTable/columns'
-import BaseTable from '@/components/base/BaseTable/index.vue'
-import BaseTag from '@/components/base/BaseTag.vue'
-import BaseTextarea from '@/components/base/BaseTextarea.vue'
 
 interface PreviewTableRow {
   id: string
@@ -244,18 +221,18 @@ function statusClass(status: PreviewTableRow['status']) {
               </template>
             </BaseInput>
             <BaseInput v-model="disabledText" aria-label="禁用输入框" disabled />
-            <FormItem label="品牌颜色" description="BaseColorPicker">
+            <BaseFormItem label="品牌颜色" description="BaseColorPicker">
               <BaseColorPicker
                 v-model="brandColor"
                 label="编辑品牌颜色"
                 :allow-alpha="false"
                 :presets="['#5983F4', '#0F766E', '#7C3AED', '#475569']"
               />
-            </FormItem>
-            <FormItem label="调度备注" description="BaseTextarea">
+            </BaseFormItem>
+            <BaseFormItem label="调度备注" description="BaseTextarea">
               <BaseTextarea v-model="notes" aria-label="调度备注" :rows="2" />
-            </FormItem>
-            <FormItem class="col-span-2" label="控件高度" description="BaseNumberInput · BaseRange">
+            </BaseFormItem>
+            <BaseFormItem class="col-span-2" label="控件高度" description="BaseNumberInput · BaseRange">
               <div class="flex items-center gap-3">
                 <BaseNumberInput
                   v-model="controlHeight"
@@ -273,7 +250,7 @@ function statusClass(status: PreviewTableRow['status']) {
                   unit="px"
                 />
               </div>
-            </FormItem>
+            </BaseFormItem>
           </BaseForm>
         </template>
       </BaseCard>

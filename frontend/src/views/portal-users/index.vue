@@ -1,18 +1,12 @@
 <script setup lang="ts">
+import type { BaseTableColumn } from '@codex-proxy/ui'
 import type { PortalUser, WalletPolicy, WalletResponse } from '@/api/modules/portal'
-import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
+import { BaseButton, BaseCard, BaseFormItem, BaseInput, BaseModal, BasePageHeader, BaseSelect, BaseTable } from '@codex-proxy/ui'
+
 import { KeyRound, Plus, RefreshCw, Users, Wallet } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { getApiKeys } from '@/api/modules/api-keys'
 import { portalRequest } from '@/api/modules/portal'
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import FormItem from '@/components/base/BaseForm/FormItem.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseModal from '@/components/base/BaseModal/index.vue'
-import BasePageHeader from '@/components/base/BasePageHeader.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseTable from '@/components/base/BaseTable/index.vue'
 import PricingSettings from './PricingSettings.vue'
 
 const availableKeys = ref<{ id: string, name: string }[]>([])
@@ -250,12 +244,12 @@ onMounted(() => action(load))
     </BaseModal>
     <BaseModal v-model="showCreate" title="创建用户" description="创建独立登录身份，初始余额为零" :dismissible="!busy">
       <form id="create-user" class="space-y-5" @submit.prevent="create">
-        <FormItem label="用户名" required>
+        <BaseFormItem label="用户名" required>
           <BaseInput v-model="username" maxlength="100" autocomplete="off" />
-        </FormItem>
-        <FormItem label="初始密码" description="至少 12 个字符" required>
+        </BaseFormItem>
+        <BaseFormItem label="初始密码" description="至少 12 个字符" required>
           <BaseInput v-model="password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" />
-        </FormItem>
+        </BaseFormItem>
         <p v-if="message" role="alert" class="text-sm text-cp-error-text">
           {{ message }}
         </p>
@@ -270,12 +264,12 @@ onMounted(() => action(load))
     </BaseModal>
     <BaseModal v-model="showAssign" title="分配密钥" description="选择已创建的独立密钥，历史归属不能转移" :dismissible="!busy">
       <form id="assign-key" class="space-y-5" @submit.prevent="assign">
-        <FormItem label="用户" required>
+        <BaseFormItem label="用户" required>
           <BaseSelect v-model="userId" :options="users.map(u => ({ label: u.username, value: u.id }))" placeholder="选择用户" />
-        </FormItem>
-        <FormItem label="密钥" required>
+        </BaseFormItem>
+        <BaseFormItem label="密钥" required>
           <BaseSelect v-model="keyId" :options="availableKeys.map(k => ({ label: k.name, value: k.id }))" placeholder="选择密钥" />
-        </FormItem>
+        </BaseFormItem>
         <p v-if="message" role="alert" class="text-sm text-cp-error-text">
           {{ message }}
         </p>
@@ -290,9 +284,9 @@ onMounted(() => action(load))
     </BaseModal>
     <BaseModal v-model="showReset" :title="`重置密码 · ${selectedUser?.username || ''}`" description="保存后该用户的全部旧登录立即失效" :dismissible="!busy">
       <form id="reset-password" class="space-y-5" @submit.prevent="reset">
-        <FormItem label="新密码" required>
+        <BaseFormItem label="新密码" required>
           <BaseInput v-model="resetPassword" type="password" minlength="12" maxlength="1024" autocomplete="new-password" />
-        </FormItem>
+        </BaseFormItem>
         <p v-if="message" role="alert" class="text-sm text-cp-error-text">
           {{ message }}
         </p>
@@ -330,12 +324,12 @@ onMounted(() => action(load))
             充值余额
           </h3>
           <div class="grid items-end gap-3 sm:grid-cols-[1fr_1.5fr_auto]">
-            <FormItem label="金额 USD" required>
+            <BaseFormItem label="金额 USD" required>
               <BaseInput v-model="credit" type="number" min="0.00000001" step="0.00000001" @update:model-value="creditOperation = ''" />
-            </FormItem>
-            <FormItem label="备注">
+            </BaseFormItem>
+            <BaseFormItem label="备注">
               <BaseInput v-model="creditNote" maxlength="500" placeholder="例如：本月用量" @update:model-value="creditOperation = ''" />
-            </FormItem>
+            </BaseFormItem>
             <BaseButton type="submit" variant="primary" :loading="busy">
               确认充值
             </BaseButton>
@@ -348,15 +342,15 @@ onMounted(() => action(load))
             </h3><span class="text-xs text-cp-text-tertiary">当前并发 {{ walletData.wallet.activeRequests }}</span>
           </div>
           <div class="grid gap-3 sm:grid-cols-3">
-            <FormItem label="每日上限 USD" required>
+            <BaseFormItem label="每日上限 USD" required>
               <BaseInput v-model="policy.dailyLimitUsd" type="number" min="0" step="0.00000001" />
-            </FormItem>
-            <FormItem label="每周上限 USD" required>
+            </BaseFormItem>
+            <BaseFormItem label="每周上限 USD" required>
               <BaseInput v-model="policy.weeklyLimitUsd" type="number" min="0" step="0.00000001" />
-            </FormItem>
-            <FormItem label="共享并发上限" required>
+            </BaseFormItem>
+            <BaseFormItem label="共享并发上限" required>
               <BaseInput v-model="concurrency" type="number" min="0" max="10000" step="1" />
-            </FormItem>
+            </BaseFormItem>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-3">
             <p class="max-w-lg text-xs leading-relaxed text-cp-text-tertiary">

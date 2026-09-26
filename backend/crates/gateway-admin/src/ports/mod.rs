@@ -3,6 +3,11 @@
 pub mod backup;
 pub mod client_distribution;
 pub mod local_usage;
+pub mod plugin_accounts;
+pub mod plugin_client_keys;
+pub mod plugin_management;
+pub mod plugin_release;
+pub mod plugins;
 pub mod portal;
 pub mod pricing;
 pub mod provider;

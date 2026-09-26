@@ -1,18 +1,11 @@
 <script setup lang="ts">
+import type { BaseTableColumn } from '@codex-proxy/ui'
 import type { Account, AccountQuotaWindow } from '@/api/modules/accounts'
-import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
+import { BaseButton, BaseCard, BaseFormItem, BaseInput, BaseModal, BasePageHeader, BaseSelect, BaseTable } from '@codex-proxy/ui'
 import { Download, Laptop, Plus, RefreshCw, Server, Sigma } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { getAccounts } from '@/api/modules/accounts'
 import { portalRequest } from '@/api/modules/portal'
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import FormItem from '@/components/base/BaseForm/FormItem.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseModal from '@/components/base/BaseModal/index.vue'
-import BasePageHeader from '@/components/base/BasePageHeader.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseTable from '@/components/base/BaseTable/index.vue'
 import PricingSummary from '../portal-users/PricingSummary.vue'
 import WeeklyHistory from './components/WeeklyHistory.vue'
 import WeeklyQuotaCard from './components/WeeklyQuotaCard.vue'
@@ -206,15 +199,15 @@ onMounted(() => action(load))
     </p>
     <BaseCard padding="compact">
       <div class="flex flex-wrap items-end gap-3">
-        <FormItem label="上游账号" class="min-w-48 flex-1">
+        <BaseFormItem label="上游账号" class="min-w-48 flex-1">
           <BaseSelect v-model="accountId" :disabled="busy" :options="[{ label: '全部账号', value: '' }, ...accounts.map(a => ({ label: a.name, value: a.id }))]" @update:model-value="historicalRange = null; action(load)" />
-        </FormItem>
-        <FormItem label="时间范围" class="min-w-36">
+        </BaseFormItem>
+        <BaseFormItem label="时间范围" class="min-w-36">
           <BaseSelect :model-value="historicalRange ? 'history' : String(days)" :disabled="busy" :options="[...(historicalRange ? [{ label: '所选历史周期', value: 'history' }] : []), { label: '当前周限', value: '0' }, { label: '最近一天', value: '1' }, { label: '最近一周', value: '7' }, { label: '最近一月', value: '30' }, { label: '最近一年', value: '365' }]" @update:model-value="historicalRange = null; days = Number($event); action(load)" />
-        </FormItem>
-        <FormItem label="数据来源" class="min-w-40">
+        </BaseFormItem>
+        <BaseFormItem label="数据来源" class="min-w-40">
           <BaseSelect v-model="sourceFilter" :options="[{ label: '双端合计', value: 'all' }, { label: '本地直连', value: 'local' }, { label: '服务器代理', value: 'proxy' }]" />
-        </FormItem>
+        </BaseFormItem>
         <p class="pb-2 text-xs text-cp-text-tertiary">
           北京时间 <span v-if="updated">· 更新于 {{ updated }}</span>
         </p>
@@ -346,11 +339,11 @@ onMounted(() => action(load))
         </BaseButton>
       </div>
       <form v-else id="create-device" class="space-y-5" @submit.prevent="create">
-        <FormItem label="设备名称" required>
+        <BaseFormItem label="设备名称" required>
           <BaseInput v-model="deviceName" maxlength="100" />
-        </FormItem><FormItem label="绑定账号" required>
+        </BaseFormItem><BaseFormItem label="绑定账号" required>
           <BaseSelect v-model="deviceAccount" :options="accounts.map(a => ({ label: a.name, value: a.id }))" placeholder="选择本机使用的账号" />
-        </FormItem>
+        </BaseFormItem>
       </form>
       <template v-if="!newToken" #footer>
         <BaseButton :disabled="busy" @click="showDevice = false">

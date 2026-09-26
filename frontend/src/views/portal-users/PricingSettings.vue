@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import type { AccountListResponse, AccountModelsResponse } from '@/api/modules/accounts'
+import { BaseButton, BaseFormItem, BaseInput, BaseModal, BaseSelect } from '@codex-proxy/ui'
 import { ref } from 'vue'
 import { portalRequest } from '@/api/modules/portal'
-import BaseButton from '@/components/base/BaseButton.vue'
-import FormItem from '@/components/base/BaseForm/FormItem.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseModal from '@/components/base/BaseModal/index.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
 
 interface Pricing { globalMultiplier: string, modelMultipliers: Record<string, string> }
 const emit = defineEmits<{ saved: [] }>()
@@ -103,9 +99,9 @@ async function save() {
   </BaseButton>
   <BaseModal v-model="open" title="计费倍率" description="用户扣费 = 原始成本 × 生效倍率" size="lg" :dismissible="!busy">
     <form id="portal-pricing" class="space-y-5" @submit.prevent="save">
-      <FormItem label="全局倍率" description="1 为原价，1.5 为加价 50%，0.8 为八折" required>
+      <BaseFormItem label="全局倍率" description="1 为原价，1.5 为加价 50%，0.8 为八折" required>
         <BaseInput v-model="globalMultiplier" :disabled="busy || !loaded" inputmode="decimal" />
-      </FormItem>
+      </BaseFormItem>
       <div class="flex items-center justify-between gap-3">
         <h3 class="font-semibold">
           单模型覆盖
@@ -123,7 +119,7 @@ async function save() {
         </BaseButton>
       </div>
       <div v-for="(row, index) in models" :key="index" class="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-start gap-3">
-        <FormItem label="模型 ID">
+        <BaseFormItem label="模型 ID">
           <div class="space-y-2">
             <BaseInput v-if="row.custom" v-model="row.model" :disabled="busy" placeholder="输入自定义模型 ID" :aria-label="`模型 ID ${index + 1}`" />
             <BaseSelect v-else v-model="row.model" class="w-full" :options="modelOptions(row.model)" :disabled="busy || catalogBusy" placeholder="选择已有模型" empty-text="暂无模型，请手动输入或重新加载" :aria-label="`选择模型 ${index + 1}`" />
@@ -131,10 +127,10 @@ async function save() {
               {{ row.custom ? '从已有模型选择' : '手动输入模型 ID' }}
             </BaseButton>
           </div>
-        </FormItem>
-        <FormItem label="倍率">
+        </BaseFormItem>
+        <BaseFormItem label="倍率">
           <BaseInput v-model="row.multiplier" :disabled="busy" inputmode="decimal" :aria-label="`模型倍率 ${index + 1}`" />
-        </FormItem>
+        </BaseFormItem>
         <BaseButton class="mt-6" variant="ghost" :disabled="busy" :aria-label="`删除模型 ${index + 1}`" @click="models.splice(index, 1)">
           删除
         </BaseButton>

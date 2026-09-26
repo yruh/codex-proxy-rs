@@ -1,17 +1,11 @@
 <script setup lang="ts">
+import type { BaseTableColumn } from '@codex-proxy/ui'
 import type { PortalKey, PortalUsage, PortalUser, WalletResponse } from '@/api/modules/portal'
-import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
+import { BaseButton, BaseCard, BaseFormItem, BaseInput, BaseModal, BasePageHeader, BaseSelect, BaseTable } from '@codex-proxy/ui'
+
 import { onMounted, ref } from 'vue'
 import { portalRequest } from '@/api/modules/portal'
 import AppBrandMark from '@/components/AppBrandMark.vue'
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import FormItem from '@/components/base/BaseForm/FormItem.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseModal from '@/components/base/BaseModal/index.vue'
-import BasePageHeader from '@/components/base/BasePageHeader.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseTable from '@/components/base/BaseTable/index.vue'
 
 const showPassword = ref(false)
 const showLedger = ref(false)
@@ -165,12 +159,12 @@ onMounted(async () => {
       </p>
       <BaseCard v-if="!user" class="mx-auto mt-16 max-w-md" title="欢迎回来" description="登录查看你的余额、密钥和调用记录">
         <form class="space-y-5" @submit.prevent="login">
-          <FormItem label="用户名" required>
+          <BaseFormItem label="用户名" required>
             <BaseInput v-model="username" autocomplete="username" maxlength="100" />
-          </FormItem>
-          <FormItem label="密码" required>
+          </BaseFormItem>
+          <BaseFormItem label="密码" required>
             <BaseInput v-model="password" type="password" autocomplete="current-password" maxlength="1024" />
-          </FormItem>
+          </BaseFormItem>
           <BaseButton class="w-full" type="submit" variant="primary" :loading="busy">
             登录
           </BaseButton>
@@ -269,15 +263,15 @@ onMounted(async () => {
       </template>
       <BaseModal v-model="showPassword" title="修改密码" description="修改后全部旧登录失效，请使用新密码重新登录" :dismissible="!busy">
         <form id="change-password" class="space-y-5" @submit.prevent="changePassword">
-          <FormItem label="当前密码" required>
+          <BaseFormItem label="当前密码" required>
             <BaseInput v-model="oldPassword" type="password" autocomplete="current-password" maxlength="1024" />
-          </FormItem>
-          <FormItem label="新密码" description="至少 12 个字符" required>
+          </BaseFormItem>
+          <BaseFormItem label="新密码" description="至少 12 个字符" required>
             <BaseInput v-model="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" />
-          </FormItem>
-          <FormItem label="确认新密码" required>
+          </BaseFormItem>
+          <BaseFormItem label="确认新密码" required>
             <BaseInput v-model="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="1024" />
-          </FormItem>
+          </BaseFormItem>
           <p v-if="error" role="alert" class="text-sm text-cp-error-text">
             {{ error }}
           </p>
@@ -306,9 +300,9 @@ onMounted(async () => {
       </BaseModal>
       <BaseModal v-model="showCreateKey" title="创建密钥" description="密钥仅归你所有，不会增加余额或并发上限" :dismissible="!busy">
         <form id="create-own-key" @submit.prevent="createKey">
-          <FormItem label="密钥名称" required>
+          <BaseFormItem label="密钥名称" required>
             <BaseInput v-model="keyName" placeholder="例如：我的电脑" maxlength="100" />
-          </FormItem>
+          </BaseFormItem>
           <p v-if="error" role="alert" class="mt-3 text-sm text-cp-error-text">
             {{ error }}
           </p>

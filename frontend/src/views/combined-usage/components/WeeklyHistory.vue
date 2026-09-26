@@ -1,13 +1,10 @@
 <script setup lang="ts">
+import type { BaseTableColumn } from '@codex-proxy/ui'
 import type { Account } from '@/api/modules/accounts'
-import type { BaseTableColumn } from '@/components/base/BaseTable/columns'
+import { BaseButton, BaseCard, BaseSelect, BaseTable } from '@codex-proxy/ui'
 import { computed, ref, watch } from 'vue'
 import { refreshAccountQuota } from '@/api/modules/accounts'
 import { portalRequest } from '@/api/modules/portal'
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseTable from '@/components/base/BaseTable/index.vue'
 
 interface Cycle {
   start: string

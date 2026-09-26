@@ -164,8 +164,7 @@ impl PortalStore for PgPortalStore {
             ));
         }
         let command = super::NewClientApiKey {
-            openai_client_profile_override: None,
-            xai_client_profile_override: None,
+            request_profile_overrides: Default::default(),
             id: key.id.clone(),
             name: key.id.clone(),
             label: Some(key.name.clone()),

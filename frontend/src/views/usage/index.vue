@@ -1,18 +1,11 @@
 <script setup lang="ts">
 import type { PortalUser } from '@/api/modules/portal'
+import { BaseCard, BaseIconButton, BasePageHeader, BaseSegmented, BaseSelect, BaseTableColumnSettings, BaseTablePagination, useTableColumns } from '@codex-proxy/ui'
 import { Eye } from '@lucide/vue'
 import { computed, onMounted, shallowRef, watch } from 'vue'
-import { portalRequest } from '@/api/modules/portal'
 
-import BaseCard from '@/components/base/BaseCard.vue'
-import BaseIconButton from '@/components/base/BaseIconButton.vue'
-import BasePageHeader from '@/components/base/BasePageHeader.vue'
-import BaseSegmented from '@/components/base/BaseSegmented.vue'
-import BaseSelect from '@/components/base/BaseSelect.vue'
-import BaseTableColumnSettings from '@/components/base/BaseTable/BaseTableColumnSettings.vue'
-import BaseTablePagination from '@/components/base/BaseTable/BaseTablePagination.vue'
-import { useTableColumns } from '@/components/base/BaseTable/useTableColumns'
-import ProviderFilterSegmented from '@/components/ProviderFilterSegmented.vue'
+import { portalRequest } from '@/api/modules/portal'
+import ProviderFilter from '@/components/ProviderFilter.vue'
 import PricingSummary from '../portal-users/PricingSummary.vue'
 import OpsErrorPanel from './components/OpsErrorPanel.vue'
 import UsageFilters from './components/UsageFilters.vue'
@@ -89,10 +82,10 @@ watch(timeRange, () => {
       <template #actions>
         <BaseSelect v-model="userQuery" :options="userOptions" class="w-48" aria-label="按用户查看用量" />
         <BaseSelect v-model="timeRange" :options="usageTimeRangeOptions" class="w-34" />
-        <ProviderFilterSegmented
+        <ProviderFilter
           v-model="providerQuery"
           :disabled="refreshingList"
-          class="w-31 shrink-0"
+          class="shrink-0"
         />
       </template>
     </BasePageHeader>

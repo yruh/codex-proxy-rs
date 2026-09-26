@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import type { Account } from '@/api/modules/accounts'
+import { BaseButton, BaseCard } from '@codex-proxy/ui'
 import { useIntervalFn, useNow } from '@vueuse/core'
 import { computed, ref, toRef, watch } from 'vue'
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
 import { useAccountQuotaForecast } from '../../accounts/composables/useAccountQuotaForecast'
 
 const props = defineProps<{ account: Account, pricingRevision?: number }>()

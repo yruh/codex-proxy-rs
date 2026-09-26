@@ -1,10 +1,6 @@
 <script setup lang="ts">
+import { BaseButton, BaseCard, BaseIconButton, BaseInput, BaseSwitch } from '@codex-proxy/ui'
 import { Plus, Trash2 } from '@lucide/vue'
-import BaseButton from '@/components/base/BaseButton.vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import BaseIconButton from '@/components/base/BaseIconButton.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseSwitch from '@/components/base/BaseSwitch.vue'
 
 defineProps<{ disabled: boolean }>()
 const disableLongContextPricing = defineModel<boolean>('disableLongContextPricing', { required: true })

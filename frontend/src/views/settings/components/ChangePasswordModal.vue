@@ -1,12 +1,8 @@
 <script setup lang="ts">
+import { BaseButton, BaseFormItem, BaseInput, BaseModal, toast } from '@codex-proxy/ui'
 import { computed, reactive, shallowRef, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { changeAdminPassword } from '@/api'
-import BaseButton from '@/components/base/BaseButton.vue'
-import FormItem from '@/components/base/BaseForm/FormItem.vue'
-import BaseInput from '@/components/base/BaseInput.vue'
-import BaseModal from '@/components/base/BaseModal/index.vue'
-import { toast } from '@/components/base/BaseToast'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useAuthStore } from '@/stores/modules/auth'
 
@@ -54,15 +50,15 @@ async function submit() {
 <template>
   <BaseModal v-model="open" title="修改管理员密码" description="验证当前密码后，设置新的登录密码" size="sm" :dismissible="!loading">
     <form :id="formId" class="grid gap-5" @submit.prevent="submit">
-      <FormItem label="当前密码" required>
+      <BaseFormItem label="当前密码" required>
         <BaseInput v-model="form.currentPassword" type="password" autocomplete="current-password" placeholder="输入当前密码" :disabled="loading" maxlength="4096" />
-      </FormItem>
-      <FormItem label="新密码" description="至少 12 个字符，建议混合使用字母、数字和符号" :error="passwordError" required>
+      </BaseFormItem>
+      <BaseFormItem label="新密码" description="至少 12 个字符，建议混合使用字母、数字和符号" :error="passwordError" required>
         <BaseInput v-model="form.newPassword" type="password" autocomplete="new-password" placeholder="设置新密码" :disabled="loading" maxlength="1024" />
-      </FormItem>
-      <FormItem label="确认新密码" :error="confirmationError" required>
+      </BaseFormItem>
+      <BaseFormItem label="确认新密码" :error="confirmationError" required>
         <BaseInput v-model="form.confirmation" type="password" autocomplete="new-password" placeholder="再次输入新密码" :disabled="loading" maxlength="1024" />
-      </FormItem>
+      </BaseFormItem>
     </form>
     <template #footer>
       <BaseButton variant="secondary" :disabled="loading" @click="open = false">
