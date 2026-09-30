@@ -118,6 +118,16 @@ pub struct RequestLocation {
     pub city: String,
     pub timezone: String,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestOverrides {
+    #[serde(default)]
+    pub disable_long_context_pricing: bool,
+    #[serde(default)]
+    pub subagent_routing_enabled: bool,
+    #[serde(default)]
+    pub subagent_model_mappings: BTreeMap<String, String>,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SmartSchedulingConfig {
@@ -244,7 +254,7 @@ impl Operation for PreviewClientProfile {
 impl From<RuntimeSettings> for ReplaceRuntimeSettings {
     fn from(settings: RuntimeSettings) -> Self {
         Self {
-            request_overrides: settings.request_overrides,
+            request_overrides: Some(settings.request_overrides),
             expected_revision: settings.config_revision,
             request_profile_updates: settings
                 .request_profiles

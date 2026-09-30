@@ -134,6 +134,10 @@ fn sdk_settings_contract_matches_host_declarations() {
             &["RequestLocation"][..],
         ),
         (
+            "../gateway-core/src/routing/mod.rs",
+            &["RequestOverrides"][..],
+        ),
+        (
             "../gateway-core/src/account/smart_scheduling.rs",
             &["SmartSchedulingValues"][..],
         ),
@@ -256,6 +260,7 @@ fn sdk_settings_contract_matches_host_declarations() {
     assert_eq!(operations.len(), outputs.len(), "公开服务方法必须完整声明");
     let assignments = replacement_fields.iter().map(|field| match field.to_string().as_str() {
         "expected_revision" => quote!(expected_revision: settings.config_revision),
+        "request_overrides" => quote!(request_overrides: Some(settings.request_overrides)),
         "request_profile_updates" => quote!(request_profile_updates: settings.request_profiles.into_iter().map(|(provider, value)| (provider, Some(value))).collect()),
         _ => quote!(#field: settings.#field),
     });
