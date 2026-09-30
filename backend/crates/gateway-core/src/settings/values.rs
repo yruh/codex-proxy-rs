@@ -2,12 +2,24 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use crate::identity::ProviderKind;
 
+/// 管理员配置的请求覆盖；冻结在请求快照内，重试不读取新版本。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestOverrides {
+    #[serde(default)]
+    pub disable_long_context_pricing: bool,
+    #[serde(default)]
+    pub subagent_routing_enabled: bool,
+    #[serde(default)]
+    pub subagent_model_mappings: BTreeMap<String, String>,
+}
+
 /// 请求可覆盖的运行设置事实；编译产物不能反向改写本值。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsValues {
     #[serde(default)]
-    pub(crate) request_overrides: crate::routing::RequestOverrides,
+    pub(crate) request_overrides: RequestOverrides,
     pub(crate) pricing: Arc<crate::metering::PricingOverrides>,
     pub(crate) request_profiles: Arc<BTreeMap<ProviderKind, crate::account::OpaqueProviderData>>,
     pub(crate) request_location_enabled: bool,
@@ -27,7 +39,7 @@ pub struct SettingsValues {
 
 impl SettingsValues {
     #[must_use]
-    pub fn with_request_overrides(mut self, policy: crate::routing::RequestOverrides) -> Self {
+    pub fn with_request_overrides(mut self, policy: RequestOverrides) -> Self {
         self.request_overrides = policy;
         self
     }
@@ -103,7 +115,7 @@ impl SettingsValues {
         min_codex_cli_version: Option<String>,
     ) -> Self {
         Self {
-            request_overrides: crate::routing::RequestOverrides::default(),
+            request_overrides: RequestOverrides::default(),
             request_profiles: Arc::default(),
             pricing: Arc::default(),
             request_location_enabled: false,

@@ -134,7 +134,7 @@ fn sdk_settings_contract_matches_host_declarations() {
             &["RequestLocation"][..],
         ),
         (
-            "../gateway-core/src/routing/mod.rs",
+            "../gateway-core/src/settings/values.rs",
             &["RequestOverrides"][..],
         ),
         (

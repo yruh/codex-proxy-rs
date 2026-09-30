@@ -510,17 +510,7 @@ impl ProviderModel {
     }
 }
 
-/// 管理员配置的请求覆盖；冻结在请求快照内，重试不读取新版本。
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RequestOverrides {
-    #[serde(default)]
-    pub disable_long_context_pricing: bool,
-    #[serde(default)]
-    pub subagent_routing_enabled: bool,
-    #[serde(default)]
-    pub subagent_model_mappings: BTreeMap<String, String>,
-}
+pub use crate::settings::RequestOverrides;
 
 /// 本次请求选择 Provider 时使用的动态过滤事实。
 #[derive(Debug, Clone, Default)]
