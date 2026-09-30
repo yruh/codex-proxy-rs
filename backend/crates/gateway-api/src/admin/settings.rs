@@ -37,6 +37,8 @@ pub type ProviderRequestProfileUpdates =
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSettingsView {
+    pub config_revision: u64,
+    pub smart_scheduling_defaults: gateway_core::account::SmartSchedulingConfig,
     pub provider_request_profiles: ProviderRequestProfiles,
     /// 固定兼容字段；值始终从 provider_request_profiles 派生。
     pub openai_client_profile: Option<serde_json::Map<String, serde_json::Value>>,
@@ -54,6 +56,7 @@ pub struct RuntimeSettingsView {
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
     pub responses_max_decompressed_body_bytes: u64,
+    pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
     pub rotation_strategy: String,
     pub min_codex_desktop_version: Option<String>,
     pub min_codex_cli_version: Option<String>,
@@ -77,6 +80,7 @@ pub struct RuntimeSettingsView {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateRuntimeSettingsRequest {
+    pub config_revision: u64,
     #[serde(default)]
     pub provider_request_profiles: ProviderRequestProfileUpdates,
     /// 兼容既有 wire；与泛化字段冲突时拒绝整个请求。
@@ -97,6 +101,7 @@ pub struct UpdateRuntimeSettingsRequest {
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
     pub responses_max_decompressed_body_bytes: u64,
+    pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
     pub rotation_strategy: String,
     pub min_codex_desktop_version: Option<String>,
     pub min_codex_cli_version: Option<String>,
@@ -223,6 +228,8 @@ impl UpdateRuntimeSettingsRequest {
             self.xai_client_profile,
         )?;
         Ok(ReplaceRuntimeSettings {
+            expected_revision: gateway_admin::model::Revision::new(self.config_revision)
+                .map_err(|_| WireValidationError::new("configRevision"))?,
             request_profile_updates,
             request_overrides: self.request_overrides,
             request_location_enabled: self.request_location_enabled,
@@ -241,6 +248,7 @@ impl UpdateRuntimeSettingsRequest {
             max_waiting_per_account: self.max_waiting_per_account,
             concurrency_wait_timeout_seconds: self.concurrency_wait_timeout_seconds,
             responses_max_decompressed_body_bytes: self.responses_max_decompressed_body_bytes,
+            smart_scheduling: self.smart_scheduling,
             rotation_strategy: RotationStrategy::parse(&self.rotation_strategy)
                 .ok_or_else(|| WireValidationError::new("rotationStrategy"))?,
             min_codex_desktop_version: self.min_codex_desktop_version,
@@ -275,6 +283,7 @@ impl From<RuntimeSettings> for RuntimeSettingsView {
             .collect::<ProviderRequestProfiles>();
         Self {
             request_overrides: settings.request_overrides,
+            config_revision: settings.config_revision.get(),
             openai_client_profile: provider_request_profiles.get("openai").cloned(),
             xai_client_profile: provider_request_profiles.get("xai").cloned(),
             provider_request_profiles,
@@ -289,6 +298,8 @@ impl From<RuntimeSettings> for RuntimeSettingsView {
             max_waiting_per_account: settings.max_waiting_per_account,
             concurrency_wait_timeout_seconds: settings.concurrency_wait_timeout_seconds,
             responses_max_decompressed_body_bytes: settings.responses_max_decompressed_body_bytes,
+            smart_scheduling: settings.smart_scheduling,
+            smart_scheduling_defaults: gateway_core::account::SmartSchedulingConfig::default(),
             rotation_strategy: settings.rotation_strategy.as_str().to_owned(),
             min_codex_desktop_version: settings.min_codex_desktop_version,
             min_codex_cli_version: settings.min_codex_cli_version,

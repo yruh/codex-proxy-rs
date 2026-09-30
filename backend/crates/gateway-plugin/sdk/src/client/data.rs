@@ -1,51 +1,53 @@
-use serde::{Serialize, de::DeserializeOwned};
+use crate::{PluginFault, call::data};
 
-use crate::{ErrorCode, PluginFault, call::data};
-
-use super::{HostClient, SessionError};
+use super::{HostClient, payload_call};
 
 impl HostClient {
-    /// 在已授权的 management／command_line 调用中分页读取账号基础事实。
+    /// 读取 Key 当前启用状态与显式分组绑定，不返回密钥。
     ///
     /// # Errors
     ///
-    /// 未获得 data 权限、调用阶段不符、参数无效或宿主读取失败时返回错误。
+    /// Key 不存在或宿主读取失败时返回错误。
+    pub async fn key_facts(
+        &self,
+        query: data::ClientKeyFactsQuery,
+    ) -> Result<data::ClientKeyFacts, PluginFault> {
+        payload_call(self, data::KEYS_GET, query).await
+    }
+
+    /// 通过宿主刷新账号额度观测，返回与 quota_facts 相同的非秘密投影。
+    /// 不修改上游额度，也不自动重置任何 Key。
+    ///
+    /// # Errors
+    /// 账号不支持刷新或 Provider 查询失败时返回错误。
+    pub async fn refresh_account_quota(
+        &self,
+        query: data::QuotaFactsQuery,
+    ) -> Result<data::QuotaFacts, PluginFault> {
+        payload_call(self, data::QUOTA_REFRESH, query).await
+    }
+
+    /// 分页读取账号基础事实。
+    ///
+    /// # Errors
+    ///
+    /// 参数无效或宿主读取失败时返回错误。
     pub async fn account_facts(
         &self,
         query: data::AccountFactsQuery,
     ) -> Result<data::AccountFactsPage, PluginFault> {
-        data_call(self, data::ACCOUNTS_LIST, query).await
+        payload_call(self, data::ACCOUNTS_LIST, query).await
     }
 
     /// 读取已有额度观测，不触发上游刷新，也不返回宿主预测结果。
     ///
     /// # Errors
     ///
-    /// 未获得 data 权限、调用阶段不符、账号不存在或宿主读取失败时返回错误。
+    /// 账号不存在或宿主读取失败时返回错误。
     pub async fn quota_facts(
         &self,
         query: data::QuotaFactsQuery,
     ) -> Result<data::QuotaFacts, PluginFault> {
-        data_call(self, data::QUOTA_GET, query).await
+        payload_call(self, data::QUOTA_GET, query).await
     }
-}
-
-async fn data_call<T: Serialize, R: DeserializeOwned>(
-    host: &HostClient,
-    method: &str,
-    query: T,
-) -> Result<R, PluginFault> {
-    let invalid = || PluginFault::new(ErrorCode::InvalidInput, "invalid data callback payload");
-    let reply = host
-        .call(
-            method,
-            serde_json::json!({}),
-            serde_json::to_vec(&query).map_err(|_| invalid())?,
-        )
-        .await
-        .map_err(SessionError::into_plugin_fault)?;
-    if reply.result != serde_json::json!({}) {
-        return Err(invalid());
-    }
-    serde_json::from_slice(&reply.payload).map_err(|_| invalid())
 }

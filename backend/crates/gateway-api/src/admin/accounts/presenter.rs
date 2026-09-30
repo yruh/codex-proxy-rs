@@ -60,6 +60,7 @@ pub(super) fn account_models_data(result: ProviderModels) -> AccountModelsData {
 pub(super) fn account_view(item: AccountDirectoryItem, now: DateTime<Utc>) -> AccountView {
     let AccountDirectoryItem {
         account,
+        capacity,
         capabilities,
         plan_type_display,
         projection,
@@ -109,6 +110,10 @@ pub(super) fn account_view(item: AccountDirectoryItem, now: DateTime<Utc>) -> Ac
         error_message: projection.error_message,
         enabled: account.enabled,
         concurrency_limit: account.concurrency_limit.map(|limit| limit.get()),
+        capacity: AccountCapacityView {
+            used_slots: capacity.used_slots,
+            total_slots: capacity.total_slots,
+        },
         weight: account.weight.get(),
         model_access: account.model_access,
         outbound_proxy_endpoint: account
@@ -147,6 +152,10 @@ impl From<AccountQuotaForecastReport> for AccountQuotaForecastData {
 
 fn quota_forecast_view(forecast: AccountQuotaForecast) -> AccountQuotaForecastView {
     AccountQuotaForecastView {
+        remaining_tokens: forecast.remaining_tokens,
+        remaining_tokens_display: display_optional_tokens(forecast.remaining_tokens),
+        remaining_usd: forecast.remaining_usd,
+        remaining_usd_display: forecast_usd_display(forecast.remaining_usd),
         estimated_priced_usd: forecast.estimated_priced_usd,
         remaining_priced_usd: forecast.remaining_priced_usd,
         effective_pricing_multiplier: forecast.effective_pricing_multiplier,
@@ -178,10 +187,6 @@ fn quota_forecast_view(forecast: AccountQuotaForecast) -> AccountQuotaForecastVi
         estimated_tokens_display: display_optional_tokens(forecast.estimated_tokens),
         estimated_usd: forecast.estimated_usd,
         estimated_usd_display: forecast_usd_display(forecast.estimated_usd),
-        remaining_tokens: forecast.remaining_tokens,
-        remaining_tokens_display: display_optional_tokens(forecast.remaining_tokens),
-        remaining_usd: forecast.remaining_usd,
-        remaining_usd_display: forecast_usd_display(forecast.remaining_usd),
     }
 }
 

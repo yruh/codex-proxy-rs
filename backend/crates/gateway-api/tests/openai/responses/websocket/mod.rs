@@ -1,5 +1,6 @@
 mod connection;
 mod forward;
+mod interrupt;
 mod protocol;
 
 use std::sync::{
@@ -307,12 +308,20 @@ struct AtomicFailureTrace {
     downstream_websocket_connection_ids: Mutex<Vec<String>>,
     initial_errors: Mutex<std::collections::VecDeque<EngineError>>,
     first_batch: Mutex<Option<CoordinatedEvent>>,
+    session_drops: Arc<AtomicUsize>,
+    middleware: Option<gateway_core::engine::middleware::FrozenMiddlewarePlan>,
 }
 
 struct AtomicFailureSession {
     trace: Arc<AtomicFailureTrace>,
     response_headers: Vec<ProviderResponseHeader>,
     fail_before_first_event: bool,
+}
+
+impl Drop for AtomicFailureSession {
+    fn drop(&mut self) {
+        self.trace.session_drops.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 impl ExecutionSession for AtomicFailureSession {
@@ -390,6 +399,13 @@ struct AtomicFailureExecution {
 }
 
 impl ExecutionService for AtomicFailureExecution {
+    fn middleware_plan(
+        &self,
+        _: &gateway_core::engine::execution::PreparedRootExecution,
+    ) -> Option<gateway_core::engine::middleware::FrozenMiddlewarePlan> {
+        self.trace.middleware.clone()
+    }
+
     fn authenticate(
         &self,
         plaintext: &str,

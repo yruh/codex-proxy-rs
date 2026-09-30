@@ -314,11 +314,12 @@ impl AccountQuotaForecast {
         self.remaining_tokens = remaining_tokens.and_then(|value| estimate_tokens(value, 1.0));
         self.estimated_tokens = remaining_tokens
             .and_then(|remaining| estimate_tokens(usage.tokens as f64 + remaining, factor));
-        self.remaining_usd = Some(&sample.usage)
+        let remaining_usd = Some(&sample.usage)
             .filter(|usage| usage.known_cost_count > 0 && usage.usd.is_finite() && usage.usd >= 0.0)
             .and_then(|usage| estimate(usage.usd, remaining_factor));
+        self.remaining_usd = remaining_usd;
         self.estimated_usd = usd
-            .zip(self.remaining_usd)
+            .zip(remaining_usd)
             .and_then(|(used, remaining)| estimate(used + remaining, factor));
         self.remaining_priced_usd = self
             .remaining_usd

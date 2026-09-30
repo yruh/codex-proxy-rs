@@ -22,11 +22,12 @@ use crate::model::{
     },
     auth::{AdminAuditEvent, AuthSession},
     client_keys::{
-        ClientKeyListQuery, ClientKeyPage, ClientKeyRecord, ClientKeySecret, DeleteClientKey,
-        NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled, UpdateClientKey,
+        ClientKeyBudgetMutationOrigin, ClientKeyListQuery, ClientKeyPage, ClientKeyRecord,
+        ClientKeySecret, DeleteClientKey, NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled,
+        UpdateClientKey, UpdateClientKeyBudgetLimits,
     },
     observability::{
-        DashboardObservation, DashboardRuntimeSlots, DiagnosticDimension, DiagnosticObservation,
+        DashboardObservation, DashboardRuntimeSlots, DiagnosticDimension, DiagnosticsObservation,
         OpsErrorPage, OpsErrorQuery, RequestMetricPoint, TimeRange, UsageCalculatedBillingFact,
         UsageDetail, UsageFilter, UsageOverview, UsagePage, UsageQuery,
     },
@@ -339,10 +340,19 @@ pub trait ClientKeyStore: Send + Sync {
         context: &MutationContext,
     ) -> AdminStoreResult<Revision>;
 
+    /// 局部更新预算上限，保留其他策略和账本；无变化时不产生配置版本或审计。
+    async fn update_client_key_budget_limits(
+        &self,
+        command: UpdateClientKeyBudgetLimits,
+        origin: ClientKeyBudgetMutationOrigin,
+        context: &MutationContext,
+    ) -> AdminStoreResult<Option<Revision>>;
+
     /// 仅修改运行时账本并原子记录审计，不推进配置版本。
     async fn reset_client_key_budget(
         &self,
         command: ResetClientKeyBudget,
+        origin: ClientKeyBudgetMutationOrigin,
         context: &MutationContext,
     ) -> AdminStoreResult<()>;
 }
@@ -441,7 +451,7 @@ pub trait ObservabilityStore: Send + Sync {
         range: TimeRange,
         filter: UsageFilter,
         dimension: DiagnosticDimension,
-    ) -> AdminStoreResult<Vec<DiagnosticObservation>>;
+    ) -> AdminStoreResult<DiagnosticsObservation>;
 
     async fn list_ops_errors(&self, query: OpsErrorQuery) -> AdminStoreResult<OpsErrorPage>;
 }
@@ -524,9 +534,15 @@ pub struct AdminStorePorts {
     backup: BackupStorePorts,
     plugins: Arc<dyn super::plugins::PluginStore>,
     plugin_state: Arc<dyn super::plugins::PluginStateStore>,
+    plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
 }
 
 impl AdminStorePorts {
+    #[must_use]
+    pub fn plugin_resources(&self) -> Arc<dyn super::plugin_resources::PluginResourceStore> {
+        self.plugin_resources.clone()
+    }
+
     #[must_use]
     pub fn plugins(&self) -> Arc<dyn super::plugins::PluginStore> {
         Arc::clone(&self.plugins)
@@ -551,6 +567,7 @@ impl AdminStorePorts {
         backup: BackupStorePorts,
         plugins: Arc<dyn super::plugins::PluginStore>,
         plugin_state: Arc<dyn super::plugins::PluginStateStore>,
+        plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
     ) -> Self {
         Self {
             portal: None,
@@ -563,6 +580,7 @@ impl AdminStorePorts {
             backup,
             plugins,
             plugin_state,
+            plugin_resources,
         }
     }
 

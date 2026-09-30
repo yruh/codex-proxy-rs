@@ -1,5 +1,6 @@
 //! PostgreSQL owner for provider-neutral account groups and memberships.
 
+use gateway_admin::model::audit::MutationAuditOperation;
 use std::{collections::BTreeMap, str::FromStr as _};
 
 use async_trait::async_trait;
@@ -228,12 +229,10 @@ impl AccountGroupStore for PgAccountGroupRepository {
         command: NewAccountGroup,
         context: &MutationContext,
     ) -> AdminStoreResult<AccountGroupMutation> {
-        validate_group_fields(&command.name, command.description.as_deref())?;
         let id = command.id.clone();
         let audit = mutation_audit(
             context,
-            "create",
-            "account_group",
+            MutationAuditOperation::AccountGroupCreate,
             id.as_str(),
             vec![
                 "name".to_owned(),
@@ -244,19 +243,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         let revision = self
             .mutate(audit, |transaction| {
                 Box::pin(async move {
-                    sqlx::query(
-                        "insert into account_groups
-                         (id, name, description, color, disable_fast, enabled, created_at, updated_at)
-                         values ($1, $2, $3, $4, $5, true, now(), now())",
-                    )
-                    .bind(command.id.as_str())
-                    .bind(command.name)
-                    .bind(command.description)
-                    .bind(command.color.as_str())
-                    .bind(command.disable_fast)
-                    .execute(&mut **transaction)
-                    .await
-                    .map_err(|error| map_group_write_error(error, command.id.as_str()))?;
+                    insert_account_group_in_transaction(transaction, &command).await?;
                     Ok(())
                 })
             })
@@ -277,8 +264,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         let id = command.id.clone();
         let audit = mutation_audit(
             context,
-            "update",
-            "account_group",
+            MutationAuditOperation::AccountGroupUpdate,
             id.as_str(),
             vec![
                 "name".to_owned(),
@@ -321,8 +307,9 @@ impl AccountGroupStore for PgAccountGroupRepository {
         let id = command.id.clone();
         let audit = mutation_audit(
             context,
-            if command.enabled { "enable" } else { "disable" },
-            "account_group",
+            MutationAuditOperation::AccountGroupEnabled {
+                enabled: command.enabled,
+            },
             id.as_str(),
             vec!["enabled".to_owned()],
         );
@@ -354,7 +341,12 @@ impl AccountGroupStore for PgAccountGroupRepository {
         context: &MutationContext,
     ) -> AdminStoreResult<AccountGroupMutation> {
         let id = command.id.clone();
-        let audit = mutation_audit(context, "delete", "account_group", id.as_str(), Vec::new());
+        let audit = mutation_audit(
+            context,
+            MutationAuditOperation::AccountGroupDelete,
+            id.as_str(),
+            Vec::new(),
+        );
         let revision = self
             .mutate(audit, |transaction| {
                 Box::pin(async move {
@@ -668,4 +660,27 @@ fn invalid(message: &str) -> StoreError {
 
 fn unavailable(message: &'static str) -> StoreError {
     postgres_unavailable(message)
+}
+
+/// 原生管理与插件自有分组共用字段校验和写入规则。
+pub(crate) async fn insert_account_group_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &NewAccountGroup,
+) -> StoreResult<()> {
+    validate_group_fields(&command.name, command.description.as_deref())
+        .map_err(|_| invalid("invalid account group fields"))?;
+    sqlx::query(
+        "insert into account_groups
+         (id, name, description, color, disable_fast, enabled, created_at, updated_at)
+         values ($1, $2, $3, $4, $5, true, now(), now())",
+    )
+    .bind(command.id.as_str())
+    .bind(&command.name)
+    .bind(&command.description)
+    .bind(command.color.as_str())
+    .bind(command.disable_fast)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|error| map_group_write_error(error, command.id.as_str()))?;
+    Ok(())
 }

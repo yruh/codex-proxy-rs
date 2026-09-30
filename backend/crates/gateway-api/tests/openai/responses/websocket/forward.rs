@@ -1,15 +1,23 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, atomic::Ordering};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 
 use axum::http::{StatusCode, header::AUTHORIZATION};
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, future::BoxFuture};
+use gateway_core::engine::middleware::{
+    FrozenMiddlewarePlan, MiddlewareContext, MiddlewareError, MiddlewareNext, MiddlewarePlan,
+    MiddlewareRequest, MiddlewareResponse,
+};
 use gateway_core::engine::{CommitRequirement, CoordinatedEvent, EngineError};
 use gateway_core::error::{
     ClientVisibleUpstreamError, ClientVisibleUpstreamResponse, ProviderError, ProviderErrorKind,
 };
 use gateway_core::event::{ProtocolWireEvent, ProviderEvent, ProviderResponseHeader};
+use gateway_core::runtime::extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference};
 use gateway_core::upstream::{OpaqueUpstreamValue, UpstreamSendState};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
@@ -140,6 +148,63 @@ fn upstream_failure(
             ClientVisibleUpstreamResponse::new(status, None, Bytes::from_static(body))
                 .with_headers(headers),
         )
+}
+
+#[derive(Debug)]
+struct InspectFailureMiddleware(Arc<AtomicUsize>);
+
+impl ExtensionSetLease for InspectFailureMiddleware {
+    fn is_ready(&self) -> bool {
+        true
+    }
+}
+
+impl MiddlewarePlan for InspectFailureMiddleware {
+    fn handle(
+        &self,
+        _: MiddlewareContext,
+        request: MiddlewareRequest,
+        next: MiddlewareNext,
+    ) -> BoxFuture<'static, Result<MiddlewareResponse, MiddlewareError>> {
+        let drops = Arc::clone(&self.0);
+        Box::pin(async move {
+            let response = next.run(request).await?;
+            assert_eq!(
+                drops.load(Ordering::Acquire),
+                0,
+                "next must retain the failed execution until the onion chain returns"
+            );
+            assert_eq!(response.status_code(), 503);
+            Ok(response)
+        })
+    }
+}
+
+#[tokio::test]
+async fn initial_failure_retains_execution_until_request_middleware_returns() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let middleware = Arc::new(InspectFailureMiddleware(Arc::clone(&drops)));
+    let trace = Arc::new(AtomicFailureTrace {
+        initial_errors: Mutex::new(VecDeque::from([EngineError::EmptyRoutingPlan])),
+        session_drops: Arc::clone(&drops),
+        middleware: Some(FrozenMiddlewarePlan::new(
+            middleware.clone(),
+            ExtensionSetReference::new(
+                ExtensionSetId::new("failure-inspector".to_owned()).unwrap(),
+                middleware,
+            ),
+        )),
+        ..AtomicFailureTrace::default()
+    });
+    let (mut socket, _server) = connect(Arc::clone(&trace), vec![]).await;
+    send_request(&mut socket).await;
+    let error = next_error(&mut socket).await;
+    assert_eq!(error["status"], 503);
+    assert_eq!(error["error"]["code"], "no_available_provider");
+    assert_no_duplicate_failure(&mut socket).await;
+    assert_eq!(drops.load(Ordering::Acquire), 1);
+    assert!(!trace.committed.load(Ordering::Acquire));
+    socket.close(None).await.unwrap();
 }
 
 #[tokio::test]
@@ -520,6 +585,24 @@ async fn initial_quota_recovery_delivers_client_projection_instead_of_upstream_s
     assert_eq!(error["error"], detail);
     assert_eq!(error["headers"]["x-request-id"], "req-quota-rejected");
     assert!(error["headers"].get("retry-after").is_none());
+}
+
+#[tokio::test]
+async fn initial_continuation_recovery_delivers_the_official_client_replay_signal() {
+    let provider = ProviderError::new(
+        ProviderErrorKind::ContinuationRecoveryRequired,
+        UpstreamSendState::NotSent,
+    )
+    .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+        "Previous response was not found. Retrying the full request.",
+        Some("previous_response_not_found".to_owned()),
+        Some("invalid_request_error".to_owned()),
+    ));
+    let error = initial_error(EngineError::Provider(provider), Vec::new()).await;
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["status"], 400);
+    assert_eq!(error["error"]["code"], "previous_response_not_found");
+    assert_eq!(error["error"]["type"], "invalid_request_error");
 }
 
 #[tokio::test]

@@ -30,6 +30,9 @@ pub(super) fn is_managed_identity_header(name: &str) -> bool {
             | "chatgpt-project-id"
             | "openai-organization"
             | "openai-project"
+            // 工作区路由和合规属性属于认证账号，不能继承下游账号的值。
+            | "x-openai-account-routing-override"
+            | "x-openai-fedramp"
             // 安装身份由当前账号写入 client_metadata，不继承下游安装头。
             | "x-codex-installation-id"
     )
@@ -214,11 +217,12 @@ impl CodexBackendClient {
         &self,
         headers: &mut HeaderMap,
     ) -> CodexClientResult<()> {
-        let provider_headers = headers.keys().cloned().collect::<Vec<_>>();
+        let mut replaced = std::collections::HashSet::new();
         for header in &self.middleware_headers {
             let name = HeaderName::from_bytes(header.name().as_bytes())?;
-            if provider_headers.contains(&name) {
-                return Err(super::client::CodexClientError::MiddlewareHeaderConflict);
+            // 宿主画像和账号鉴权先形成基线；插件首次写入同名头时替换，随后保留多值。
+            if replaced.insert(name.clone()) {
+                headers.remove(&name);
             }
             headers.append(name, HeaderValue::from_bytes(header.value())?);
         }

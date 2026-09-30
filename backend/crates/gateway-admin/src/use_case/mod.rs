@@ -13,6 +13,7 @@ pub mod local_usage;
 pub mod observability;
 pub mod plugin_accounts;
 pub mod plugin_client_keys;
+pub mod plugin_resources;
 pub(crate) mod plugin_update;
 pub mod plugins;
 pub mod portal;

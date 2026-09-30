@@ -23,7 +23,7 @@ use crate::engine::{
     CommitRequirement, ContinuationAttempt, CoordinatedEvent, EngineError, ExecutionOutcome,
     ExecutionStore, GatewayEngine, IntermediateFailure, ModelRequestFailureObservation,
     ModelRequestFinalization, ModelRequestId, NewModelRequest, ProviderAccountStateOwner,
-    ProviderAttemptOutcome, RequestAttemptContext, UpstreamSendState,
+    RequestAttemptContext, UpstreamSendState,
 };
 use crate::error::{
     ContinuationRecoveryDisposition, GatewayError, GatewayErrorKind, ProviderError,
@@ -52,12 +52,14 @@ enum AccountSelection {
 }
 
 pub(super) struct CoordinationExtensions {
+    response_control: Option<super::response_control::ResponseControl>,
     continuation: Option<ContinuationBinding>,
     observation: Option<RequestObservationDispatch>,
     request_policy: Option<super::policy::RequestPolicyContext>,
     execution_effects: Option<Arc<ExecutionEffects>>,
     execution_effects_baseline: usize,
     middleware: Option<super::middleware::FrozenMiddlewarePlan>,
+    upstream_adapters: Option<super::upstream_adapter::FrozenUpstreamAdapterPlan>,
     account_group_ids: Arc<[crate::account::scope::AccountGroupId]>,
     endpoint: String,
     client_transport: super::execution::ClientTransport,
@@ -65,17 +67,35 @@ pub(super) struct CoordinationExtensions {
 }
 
 impl CoordinationExtensions {
+    pub(super) fn with_upstream_adapters(
+        mut self,
+        plan: Option<super::upstream_adapter::FrozenUpstreamAdapterPlan>,
+    ) -> Self {
+        self.upstream_adapters = plan;
+        self
+    }
+
+    pub(super) fn with_response_control(
+        mut self,
+        control: Option<super::response_control::ResponseControl>,
+    ) -> Self {
+        self.response_control = control;
+        self
+    }
+
     pub(super) fn new(
         continuation: Option<ContinuationBinding>,
         observation: Option<RequestObservationDispatch>,
     ) -> Self {
         Self {
             continuation,
+            response_control: None,
             observation,
             request_policy: None,
             execution_effects: None,
             execution_effects_baseline: 0,
             middleware: None,
+            upstream_adapters: None,
             account_group_ids: Arc::from([]),
             endpoint: String::new(),
             client_transport: super::execution::ClientTransport::InternalProbe,
@@ -230,12 +250,14 @@ where
         cancellation: CancellationToken,
     ) -> Result<ResponseExecutionSession<S>, EngineError> {
         let CoordinationExtensions {
+            response_control,
             continuation,
             observation: request_observation,
             request_policy,
             execution_effects,
             execution_effects_baseline,
             middleware,
+            upstream_adapters,
             account_group_ids,
             endpoint,
             client_transport,
@@ -305,14 +327,17 @@ where
                         .map(|model| model.as_str().to_owned())
                 })
                 .unwrap_or_default(),
+            requested_model: request.requested_model.clone(),
             pending_request: Some(request),
             request_persisted: false,
+            response_control,
             operation,
             plan,
             request_policy,
             execution_effects,
             execution_effects_baseline,
             middleware,
+            upstream_adapters,
             account_group_ids,
             endpoint,
             client_transport,
@@ -343,7 +368,7 @@ where
             image_generation_requested,
             last_retryable_failure: None,
             last_retryable_failure_events: Vec::new(),
-            provider_attempt_outcomes: Vec::new(),
+            last_observed_provider: None,
             pending_terminal_failure: None,
         };
 
@@ -421,13 +446,16 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     deadline_timer: Fuse<Delay>,
     pending_request: Option<NewModelRequest>,
     billing_model_id: String,
+    requested_model: Option<crate::routing::PublicModelId>,
     request_persisted: bool,
+    response_control: Option<super::response_control::ResponseControl>,
     operation: Operation,
     plan: RoutingPlan,
     request_policy: Option<super::policy::RequestPolicyContext>,
     execution_effects: Option<Arc<ExecutionEffects>>,
     execution_effects_baseline: usize,
     middleware: Option<super::middleware::FrozenMiddlewarePlan>,
+    upstream_adapters: Option<super::upstream_adapter::FrozenUpstreamAdapterPlan>,
     account_group_ids: Arc<[crate::account::scope::AccountGroupId]>,
     endpoint: String,
     client_transport: super::execution::ClientTransport,
@@ -470,7 +498,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     last_retryable_failure: Option<ProviderError>,
     /// 与 `last_retryable_failure` 同属一个 attempt 的原始失败批次。
     last_retryable_failure_events: Vec<ProviderEvent>,
-    provider_attempt_outcomes: Vec<ProviderAttemptOutcome>,
+    last_observed_provider: Option<crate::identity::ProviderKind>,
     /// 原子失败批次已交给协议层、但尚待下游提交后收敛的原 Provider 错误。
     pending_terminal_failure: Option<PendingTerminalFailure>,
 }
@@ -705,14 +733,6 @@ where
             .unwrap_or(Decimal::ZERO)
     }
 
-    /// 返回截至当前已完成的实际上游调用结果。
-    ///
-    /// 调用方可保存已消费下标；该切片在会话生命周期内只追加、不改写。
-    #[must_use]
-    pub fn provider_attempt_outcomes(&self) -> &[ProviderAttemptOutcome] {
-        &self.provider_attempt_outcomes
-    }
-
     /// 返回最终选中 attempt 已公开给协议层的安全响应头。
     #[must_use]
     pub fn response_headers(&self) -> &[ProviderResponseHeader] {
@@ -757,7 +777,16 @@ where
                 provider,
                 account,
             )
-            .with_scope(NativeContinuationScope::Persisted)
+            .with_scope(
+                if state
+                    .extension_owner()
+                    .is_some_and(|owner| owner.connection_local)
+                {
+                    NativeContinuationScope::ConnectionLocal
+                } else {
+                    NativeContinuationScope::Persisted
+                },
+            )
             .with_session_state(state.clone()),
         )
     }
@@ -1010,6 +1039,7 @@ where
         }
         let context = AttemptContext::new(
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
+                .with_response_control(self.response_control.clone())
                 .with_request_profile(self.request_profiles.get(candidate.provider()).cloned())
                 .with_disable_fast(self.plan.disable_fast())
                 .with_disable_long_context_pricing(self.plan.disable_long_context_pricing())
@@ -1020,6 +1050,8 @@ where
                 .with_timing_started_at(self.observation.timing_started_at)
                 .with_request_policy(self.request_policy.clone())
                 .with_execution_effects(self.execution_effects.as_ref().map(Arc::clone))
+                .with_upstream_adapters(self.upstream_adapters.clone())
+                .with_requested_model(self.requested_model.clone())
                 .with_middleware(
                     self.middleware.clone(),
                     Arc::clone(&self.account_group_ids),
@@ -1151,7 +1183,7 @@ where
                             | ProviderErrorKind::ConcurrencyQueueTimeout
                     ) && error.send_state() == UpstreamSendState::NotSent)
                     {
-                        self.record_provider_failure(candidate.provider().clone(), error.kind());
+                        self.record_provider_failure(candidate.provider().clone());
                     }
                     self.finish_provider_error(&error).await?;
                     return Err(provider_engine_error(error));
@@ -1160,7 +1192,7 @@ where
         };
         if !stream.metadata().confirms(&candidate) {
             drop(stream);
-            self.record_provider_failure(candidate.provider().clone(), ProviderErrorKind::Protocol);
+            self.record_provider_failure(candidate.provider().clone());
             let error = GatewayError::new(
                 GatewayErrorKind::Internal,
                 "provider metadata did not match the frozen candidate",
@@ -1410,7 +1442,7 @@ where
                 self.observe_websocket_response(event, websocket_attempt.clone());
             }
         }
-        self.record_provider_failure(current.metadata.provider().clone(), error.kind());
+        self.record_provider_failure(current.metadata.provider().clone());
         // attempt_send_state 是本 attempt 自身的发送事实；共享 effect 单独作为
         // 一票否决的重试门。持久化与终态用请求级水位，不能把早先 Provider attempt
         // 的 sent 传染给当前 attempt，但任何已观测外部副作用都必须阻止重放。
@@ -1594,9 +1626,9 @@ where
                     self.observation.observe_event(fact);
                 }
             }
-            // 普通 clone 只保留稳定事实；原始 wire/HTTP response 由 request-local
-            // 所有权保留到下一次 attempt 成功，或最终空选路时返回客户端。
-            let persistence_error = self.request_persisted.then(|| error.clone());
+            // 原始 wire/HTTP response 由 request-local 所有权保留到下一次 attempt
+            // 成功，或最终空选路时返回客户端；持久化只取得稳定事实快照。
+            let persistence_error = self.request_persisted.then(|| error.stable_snapshot());
             if same_account_retry {
                 let account = current.metadata.provider_account_id().clone();
                 self.credential_recovery_attempted_accounts
@@ -2078,11 +2110,7 @@ where
             .current
             .as_ref()
             .map(|current| current.metadata.provider().clone())
-            .or_else(|| {
-                self.provider_attempt_outcomes
-                    .last()
-                    .map(|outcome| outcome.provider_kind().clone())
-            });
+            .or_else(|| self.last_observed_provider.clone());
         let observer = self.request_observation.clone();
         let observation = observer.as_ref().map(|observer| {
             observer.finalization(
@@ -2223,21 +2251,12 @@ where
             .as_ref()
             .map(|current| current.metadata.provider().clone());
         if let Some(provider_kind) = provider_kind {
-            self.provider_attempt_outcomes
-                .push(ProviderAttemptOutcome::Succeeded { provider_kind });
+            self.last_observed_provider = Some(provider_kind);
         }
     }
 
-    fn record_provider_failure(
-        &mut self,
-        provider_kind: crate::identity::ProviderKind,
-        error_kind: ProviderErrorKind,
-    ) {
-        self.provider_attempt_outcomes
-            .push(ProviderAttemptOutcome::Failed {
-                provider_kind,
-                error_kind,
-            });
+    fn record_provider_failure(&mut self, provider_kind: crate::identity::ProviderKind) {
+        self.last_observed_provider = Some(provider_kind);
     }
 }
 

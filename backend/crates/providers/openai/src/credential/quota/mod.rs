@@ -202,7 +202,13 @@ pub enum CodexCredentialQuotaError {
     #[error("Codex quota credential revision is stale")]
     RevisionConflict,
     #[error("Codex quota upstream query failed: {detail}")]
-    Upstream { detail: String },
+    Upstream {
+        detail: String,
+        /// 上游 HTTP 状态码；传输失败等无响应场景为 `None`。
+        status: Option<u16>,
+        /// 有界错误码，供内部诊断和已知码映射使用，不直接拼入公开提示。
+        code: Option<String>,
+    },
 }
 
 /// 主动额度重置卡查询/消费失败。
@@ -259,6 +265,38 @@ impl From<gateway_core::error::StoreError> for CodexCredentialQuotaError {
             detail: error.to_string(),
         }
     }
+}
+
+/// 客户端错误携带的 HTTP 状态码；传输失败等为 `None`。
+fn upstream_error_status(error: &CodexClientError) -> Option<u16> {
+    match error {
+        CodexClientError::Upstream { status, .. } => Some(status.as_u16()),
+        _ => None,
+    }
+}
+
+/// 从上游错误体提取稳定错误码：优先 `/error/code`，其次 `/code`。
+///
+/// 只接受有界的 ASCII 标识，避免把自由文本作为错误码写入诊断。
+fn upstream_error_code(error: &CodexClientError) -> Option<String> {
+    let CodexClientError::Upstream { body, .. } = error else {
+        return None;
+    };
+    let value = serde_json::from_str::<Value>(body).ok()?;
+    let code = value
+        .pointer("/error/code")
+        .or_else(|| value.pointer("/code"))
+        .and_then(Value::as_str)?
+        .trim();
+    if code.is_empty()
+        || code.len() > 64
+        || !code
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
+        return None;
+    }
+    Some(code.to_owned())
 }
 
 pub struct CodexCredentialQuotaService {
@@ -880,12 +918,19 @@ impl CodexCredentialQuotaService {
     }
 
     pub async fn synchronize(&self) -> Result<CodexQuotaSyncSummary, CodexCredentialQuotaError> {
+        self.synchronize_at(SystemTime::now()).await
+    }
+
+    /// 按本轮调度时刻选择到期账号；实际 HTTP 观察与落库仍使用发生时刻。
+    pub async fn synchronize_at(
+        &self,
+        now: SystemTime,
+    ) -> Result<CodexQuotaSyncSummary, CodexCredentialQuotaError> {
         let mut accounts = self.repository.list_for_provider().await?;
         accounts.retain(|account| {
             account.authentication_kind() == crate::credential::CODEX_AUTHENTICATION_KIND_OAUTH
         });
         let mut summary = CodexQuotaSyncSummary::default();
-        let now = SystemTime::now();
         let account_ids = accounts
             .iter()
             .map(|account| account.id().clone())
@@ -969,6 +1014,8 @@ impl CodexCredentialQuotaService {
                             tracing::warn!(
                                 account_id = %account.id(),
                                 error = %error,
+                                upstream_status = upstream_error_status(&error),
+                                upstream_code = ?upstream_error_code(&error),
                                 "OpenAI quota upstream rejection; refresh cycle will retry later"
                             );
                         }
@@ -1499,6 +1546,8 @@ impl CodexCredentialQuotaService {
                 }
                 return Err(CodexCredentialQuotaError::Upstream {
                     detail: error.to_string(),
+                    status: upstream_error_status(&error),
+                    code: upstream_error_code(&error),
                 });
             }
         };

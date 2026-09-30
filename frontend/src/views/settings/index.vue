@@ -54,6 +54,7 @@ const {
   resetSettings,
   error,
   form,
+  smartSchedulingDefaults,
   mappings,
   subagentMappings,
   addMapping,
@@ -149,7 +150,13 @@ watch(section, (value) => {
             v-model:max-concurrent-per-account="maxConcurrentPerAccountValue"
             v-model:request-interval-ms="requestIntervalMsValue"
           />
-          <RotationStrategyCard v-model="form.rotationStrategy" :options="rotationOptions" />
+          <RotationStrategyCard
+            v-model="form.rotationStrategy"
+            v-model:smart-scheduling="form.smartScheduling"
+            :smart-defaults="smartSchedulingDefaults"
+            :disabled="disabled"
+            :options="rotationOptions"
+          />
           <RequestQueueCard
             v-model:max-waiting-per-key="maxWaitingPerKeyValue"
             v-model:max-waiting-per-account="maxWaitingPerAccountValue"

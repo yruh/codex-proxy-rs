@@ -9,9 +9,11 @@ use gateway_api::admin::accounts::{
 use gateway_core::operation::RawJsonPayload;
 
 #[test]
-fn quota_forecast_projection_only_exposes_capacity_and_preserves_null_zero() {
+fn quota_forecast_projection_preserves_capacity_remaining_and_null_zero() {
     let now = "2026-09-12T00:00:00Z".parse().unwrap();
     let forecast = AccountQuotaForecast {
+        remaining_tokens: None,
+        remaining_usd: None,
         estimated_priced_usd: None,
         remaining_priced_usd: None,
         effective_pricing_multiplier: None,
@@ -32,13 +34,13 @@ fn quota_forecast_projection_only_exposes_capacity_and_preserves_null_zero() {
         incomplete_tokens: false,
         estimated_tokens: Some(1_000_000),
         estimated_usd: None,
-        remaining_tokens: Some(0),
-        remaining_usd: None,
     };
     let mut monthly = forecast.clone();
     monthly.period = AccountUsagePeriod::Monthly;
     monthly.extrapolated = true;
     monthly.target_seconds = 30 * 86_400;
+    monthly.estimated_tokens = Some(0);
+    monthly.estimated_usd = Some(0.0);
     let view = AccountQuotaForecastData::from(AccountQuotaForecastReport {
         account_id: "acct_forecast".to_owned(),
         generated_at: now,
@@ -52,7 +54,10 @@ fn quota_forecast_projection_only_exposes_capacity_and_preserves_null_zero() {
     assert_eq!(week["estimatedTokensDisplay"], "1M");
     assert!(week["estimatedUsd"].is_null());
     assert_eq!(week["estimatedUsdDisplay"], "—");
-    assert_eq!(week["remainingTokensDisplay"], "0");
+    assert!(week["remainingTokens"].is_null());
+    assert_eq!(week["remainingTokensDisplay"], "—");
+    assert!(week["remainingUsd"].is_null());
+    assert_eq!(week["remainingUsdDisplay"], "—");
     assert_eq!(
         week["source"],
         serde_json::json!({
@@ -69,6 +74,10 @@ fn quota_forecast_projection_only_exposes_capacity_and_preserves_null_zero() {
     assert!(week.get("method").is_none());
     assert!(week.get("methodDisplay").is_none());
     assert!(value.get("generatedAtDisplay").is_none());
+    assert_eq!(value["forecasts"][1]["estimatedTokens"], 0);
+    assert_eq!(value["forecasts"][1]["estimatedTokensDisplay"], "0");
+    assert_eq!(value["forecasts"][1]["estimatedUsd"], 0.0);
+    assert_eq!(value["forecasts"][1]["estimatedUsdDisplay"], "$0.00");
     assert_eq!(value["forecasts"][1]["period"], "monthly");
     assert_eq!(value["forecasts"][1]["targetDays"], 30.0);
     assert_eq!(value["forecasts"][1]["extrapolated"], true);

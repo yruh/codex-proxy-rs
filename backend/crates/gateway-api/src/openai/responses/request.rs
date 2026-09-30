@@ -469,10 +469,11 @@ pub(super) fn decode_request_object(
         });
     }
     let model = model.to_owned();
-    let stream = object
-        .get("stream")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
+    // 缺省值只决定下游交付方式，不补写正文或改变 Provider 的上游流式执行。
+    let stream = match object.get("stream") {
+        Some(value) => value.as_bool().unwrap_or(true),
+        None => matches!(source, RequestDecodeSource::WebSocketFrame),
+    };
     let store = object
         .get("store")
         .and_then(Value::as_bool)
@@ -584,6 +585,8 @@ fn passthrough_header_name(name: &str, connection_headers: &[String]) -> bool {
             | "chatgpt-project-id"
             | "openai-organization"
             | "openai-project"
+            | "x-openai-account-routing-override"
+            | "x-openai-fedramp"
             // 上游指纹必须由运行时画像统一生成，客户端 originator/User-Agent/version
             // 不能作为不透明头透传覆盖，避免不同下游客户端暴露不一致的设备指纹。
             | "originator"

@@ -19,12 +19,11 @@ import { CheckCircle2, Download, FileArchive, Link, PackageOpen } from '@lucide/
 import { useEventListener, useSessionStorage } from '@vueuse/core'
 import { isEqual } from 'es-toolkit'
 import { computed, nextTick, reactive, shallowRef, watch } from 'vue'
-import { formatDateTime } from '@/utils/date'
 import { formatPluginFileSize, normalizePluginRepository, pluginInstallSelectionKey } from '../utils/model'
+import { selectPluginReleaseAsset } from '../utils/updates'
 import PluginAssetPicker from './PluginAssetPicker.vue'
 import PluginDownloadAuthentication from './PluginDownloadAuthentication.vue'
 import PluginHelpPopover from './PluginHelpPopover.vue'
-import PluginPermissionSummary from './PluginPermissionSummary.vue'
 import PluginSourceProxyField from './PluginSourceProxyField.vue'
 
 export type PluginInstallMode = 'upload' | 'url' | 'github'
@@ -80,7 +79,6 @@ interface InstallDraft {
   github: Omit<typeof githubForm, 'asset'>
 }
 const drafts = useSessionStorage<Record<string, InstallDraft>>('cp-plugin-install-drafts', {}, { flush: 'sync' })
-const draftKey = computed(() => props.updateSource ? `plugin:${props.updateSource.pluginId}` : 'install')
 let activeDraftKey: string | null = null
 const queriedGithubKey = shallowRef('')
 const pendingAuthentication = shallowRef(false)
@@ -148,9 +146,6 @@ const verified = computed<VerifiedPluginArtifact | null>(() => {
 const previousArtifact = computed(() => props.installedArtifacts
   .filter(artifact => artifact.acceptedAt && artifact.metadata.pluginId === verified.value?.metadata.pluginId)
   .sort((left, right) => right.acceptedAt!.localeCompare(left.acceptedAt!))[0])
-const addedPermissions = computed(() => verified.value?.metadata.permissionDescriptions.filter(permission =>
-  !previousArtifact.value?.metadata.requestedPermissions.includes(permission.permission),
-) ?? [])
 const installationLabel = computed(() => previousArtifact.value ? '安装新版本' : '安装')
 const sourceDraft = computed<PluginUpdateSourceBinding | null>(() => {
   const previous = props.updateSource
@@ -204,7 +199,7 @@ async function verifySelected() {
 }
 
 function reset() {
-  activeDraftKey = props.acceptanceArtifact ? null : draftKey.value
+  activeDraftKey = props.acceptanceArtifact || props.updateSource ? null : 'install'
   uploadFile.value = null
   Object.assign(urlForm, {
     url: '',
@@ -236,7 +231,6 @@ function reset() {
   }
   if (previousGithub?.kind === 'github') {
     githubForm.repository = previousGithub.repository
-    githubForm.tag = previousGithub.tag
     githubForm.credentialIds = previousGithub.credential_ids.filter(id => props.credentials.some(credential => credential.id === id))
     githubForm.outboundProxyId = previousGithub.outbound_proxy?.id ?? ''
   }
@@ -254,17 +248,16 @@ function reset() {
     }
     githubForm.repository = source.source.repository
     githubForm.outboundProxyId = source.outboundProxyId ?? ''
-    if (source.policy.kind !== 'manual')
-      githubForm.tag = source.policy.kind === 'pinned' ? source.policy.tag : ''
+    githubForm.tag = source.policy.kind === 'pinned' ? source.policy.tag : ''
     githubForm.allowPrerelease = source.policy.kind === 'pinned' && source.policy.allow_prerelease
   }
-  const draft = drafts.value[draftKey.value]
-  if (draft && !props.acceptanceArtifact) {
+  const draft = activeDraftKey ? drafts.value[activeDraftKey] : null
+  if (draft) {
     Object.assign(urlForm, draft.url, { credentialIds: draft.url.credentialIds.filter(id => props.credentials.some(credential => credential.id === id)) })
     Object.assign(githubForm, draft.github, { credentialIds: draft.github.credentialIds.filter(id => props.credentials.some(credential => credential.id === id)) })
     emit('changeMode', draft.mode)
   }
-  // 明确选择的检查结果优先于旧草稿，仍需重新校验包并确认安装权限。
+  // 明确选择的检查结果优先于旧草稿，仍需重新校验包并确认信任来源。
   const selection = props.updateSelection
   if (selection?.binding.source.kind === 'github' && selection.release) {
     Object.assign(githubForm, {
@@ -410,8 +403,8 @@ watch(
 watch(
   () => props.release,
   async (release) => {
-    // 唯一归档可直接解析，多个归档交给用户选择，平台兼容性仍由包检查器确认。
-    githubForm.asset = release && releaseAssets.value.length === 1 ? releaseAssets.value[0]!.name : ''
+    const previous = props.installedArtifacts.find(artifact => artifact.metadata.pluginId === props.updateSource?.pluginId)
+    githubForm.asset = release ? selectPluginReleaseAsset(release, previous)?.name ?? '' : ''
     if (githubForm.asset) {
       await nextTick()
       await verifySelected()
@@ -424,7 +417,7 @@ watch(
   <BaseModal
     v-model="open"
     :title="updateSource ? '更新插件' : '安装插件'"
-    :description="acceptanceArtifact ? '确认访问权限后安装' : updateSource ? '检查设置兼容性后切换版本' : '支持本地插件包、URL 与 GitHub'"
+    :description="acceptanceArtifact ? '确认来源与版本后安装' : updateSource ? '检查设置兼容性后切换版本' : '支持本地插件包、URL 与 GitHub'"
     size="md"
     :dismissible="!busy"
   >
@@ -541,7 +534,7 @@ watch(
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 class="m-0 min-w-0 break-words text-cp-sm font-emphasis text-cp-text">
+            <h3 class="m-0 min-w-0 wrap-break-word text-cp-sm font-emphasis text-cp-text">
               {{ verified.metadata.displayName }}
             </h3>
             <BaseTag>{{ verified.metadata.version }}</BaseTag>
@@ -559,7 +552,7 @@ watch(
         <dt class="text-cp-text-secondary">
           发布者
         </dt>
-        <dd class="m-0 min-w-0 break-words">
+        <dd class="m-0 min-w-0 wrap-break-word">
           {{ verified.metadata.publisher }}
         </dd>
         <dt class="text-cp-text-secondary">
@@ -571,20 +564,8 @@ watch(
           </BaseTag>
         </dd>
       </dl>
-      <div class="mt-4 grid gap-3">
-        <p v-if="previousArtifact" class="m-0 text-cp-sm font-emphasis">
-          {{ addedPermissions.length ? '新增访问权限' : '没有新增访问权限' }}
-        </p>
-        <PluginPermissionSummary v-if="!previousArtifact || addedPermissions.length" :permissions="addedPermissions" />
-        <details v-if="previousArtifact && verified.metadata.permissionDescriptions.length" class="text-cp-xs text-cp-text-secondary">
-          <summary class="cursor-pointer py-1 outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline">
-            全部访问权限
-          </summary>
-          <PluginPermissionSummary class="mt-3" :permissions="verified.metadata.permissionDescriptions" />
-        </details>
-      </div>
       <p class="mt-4 mb-0 text-cp-xs leading-relaxed text-cp-text-secondary">
-        安装即授权，插件以网关身份运行，请仅安装可信来源
+        插件可访问全部网关数据与配置，安装前请确认来源可信
       </p>
       <div v-if="previousArtifact" class="mt-2 flex items-center gap-1.5 text-cp-xs text-cp-text-secondary">
         <span>安装后确认切换到新版本</span>
@@ -598,7 +579,7 @@ watch(
       <BaseButton v-if="verified && !acceptanceArtifact" variant="ghost" :disabled="busy" class="mr-auto" @click="$emit('resetVerification')">
         返回
       </BaseButton>
-      <BaseButton v-if="!verified && mode === 'github' && release" variant="secondary" :disabled="busy || authenticationIncomplete" :title="`缓存至 ${formatDateTime(release.expiresAt)}`" @click="queryRelease">
+      <BaseButton v-if="!verified && mode === 'github' && release" variant="secondary" :disabled="busy || authenticationIncomplete" @click="queryRelease">
         重新查询
       </BaseButton>
       <BaseButton variant="secondary" :disabled="busy" @click="open = false">

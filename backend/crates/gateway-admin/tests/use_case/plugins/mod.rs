@@ -107,7 +107,7 @@ impl gateway_admin::ports::proxy::ProxyStore for TestPluginPorts {
 
 #[async_trait]
 impl gateway_admin::ports::plugin_management::PluginManagement for TestPluginPorts {
-    async fn authorize_models(
+    async fn validate_target(
         &self,
         _: &gateway_core::runtime::extensions::ExtensionSetReference,
         _: &gateway_admin::model::plugins::management::PluginManagementTarget,
@@ -160,6 +160,44 @@ impl gateway_admin::ports::plugin_management::PluginManagement for TestPluginPor
     ) -> Result<gateway_admin::model::plugins::management::PluginManagementResponse, AdminError>
     {
         Err(AdminError::not_found("unused plugin fixture"))
+    }
+}
+
+#[async_trait]
+impl gateway_admin::ports::plugins::PluginRuntimeDiagnostics for TestPluginPorts {
+    async fn runtime_diagnostics(
+        &self,
+        _: &gateway_admin::model::plugins::instances::PluginInstanceSnapshot,
+        _: Option<u64>,
+        _: Option<&gateway_core::runtime::extensions::ExtensionSetReference>,
+    ) -> Option<
+        std::collections::BTreeMap<
+            String,
+            gateway_admin::model::plugins::instances::PluginInstanceRuntime,
+        >,
+    > {
+        None
+    }
+}
+
+#[async_trait]
+impl gateway_admin::ports::plugins::PluginStateLifecycle for TestPluginPorts {
+    async fn activate_state(
+        &self,
+        _: &gateway_core::runtime::extensions::ExtensionSetReference,
+        _: &gateway_admin::model::plugins::instances::PluginInstance,
+    ) -> Result<(), AdminError> {
+        panic!("unexpected state activation")
+    }
+    async fn quiesce_instance(&self, _: &str, _: &str, _: gateway_admin::model::Revision) {
+        panic!("unexpected instance drain")
+    }
+    async fn migrate_state(
+        &self,
+        _: &gateway_core::runtime::extensions::ExtensionSetReference,
+        _: gateway_admin::model::plugins::state::PluginStateTransition,
+    ) -> Result<(), AdminError> {
+        panic!("unexpected state migration")
     }
 }
 
@@ -399,5 +437,48 @@ impl gateway_admin::ports::plugins::PluginDistribution for TestPluginPorts {
         _: Option<gateway_admin::model::plugins::distribution::PluginDistributionEgress>,
     ) -> Result<DownloadedPlugin, AdminError> {
         Err(AdminError::invalid("unused plugin fixture"))
+    }
+}
+
+#[async_trait::async_trait]
+impl gateway_admin::ports::plugin_resources::PluginResourceStore for TestPluginPorts {
+    async fn ensure_group(
+        &self,
+        _: &gateway_admin::model::plugin_resources::PluginResourceOwner,
+        _: String,
+        _: gateway_admin::model::account_groups::NewAccountGroup,
+        _: &gateway_admin::model::MutationContext,
+    ) -> gateway_admin::ports::store::AdminStoreResult<
+        gateway_admin::model::plugin_resources::ResourceMutation<
+            gateway_admin::model::plugin_resources::ManagedResource,
+        >,
+    > {
+        unreachable!("resource port is not used by this fixture")
+    }
+    async fn ensure_key(
+        &self,
+        _: &gateway_admin::model::plugin_resources::PluginResourceOwner,
+        _: String,
+        _: Vec<String>,
+        _: gateway_admin::model::client_keys::NewClientKey,
+        _: &gateway_admin::model::MutationContext,
+    ) -> gateway_admin::ports::store::AdminStoreResult<
+        gateway_admin::model::plugin_resources::ResourceMutation<
+            gateway_admin::model::plugin_resources::ManagedResource,
+        >,
+    > {
+        unreachable!("resource port is not used by this fixture")
+    }
+    async fn change_members(
+        &self,
+        _: &gateway_admin::model::plugin_resources::PluginResourceOwner,
+        _: gateway_admin::model::plugin_resources::GroupMembersChange,
+        _: &gateway_admin::model::MutationContext,
+    ) -> gateway_admin::ports::store::AdminStoreResult<
+        gateway_admin::model::plugin_resources::ResourceMutation<
+            gateway_admin::model::plugin_resources::GroupMembersChanged,
+        >,
+    > {
+        unreachable!("resource port is not used by this fixture")
     }
 }

@@ -1,5 +1,5 @@
 import type { rotationOptions } from '../constants'
-import type { RequestLocation } from '@/api'
+import type { RequestLocation, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/client-profiles'
 import { toast } from '@codex-proxy/ui'
 import { isEqual } from 'es-toolkit'
@@ -8,8 +8,8 @@ import { computed, reactive, ref, shallowRef } from 'vue'
 import { getSettings, updateSettings } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
-import { errorMessage } from '@/utils/async'
-import { normalizeRequestLocation, requestLocationError } from '@/utils/request-location'
+import { normalizeRequestLocation, requestLocationError } from '@/utils/data'
+import { errorMessage } from '@/utils/operation'
 
 type RotationStrategy = (typeof rotationOptions)[number]['value']
 
@@ -23,9 +23,12 @@ export function useSettingsForm() {
   const mappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const subagentMappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const savedRequestLocation = shallowRef<RequestLocation>()
+  const smartSchedulingDefaults = shallowRef<SmartSchedulingConfig>()
   const form = reactive({
     disableLongContextPricing: false,
     subagentRoutingEnabled: false,
+    configRevision: 0,
+    smartScheduling: undefined as SmartSchedulingConfig | undefined,
     providerRequestProfiles: {} as ProviderRequestProfiles,
     requestLocationEnabled: false,
     requestLocation: { country: '', region: '', city: '', timezone: '' },
@@ -61,6 +64,7 @@ export function useSettingsForm() {
     return {
       form: {
         ...form,
+        smartScheduling: form.smartScheduling ? { ...form.smartScheduling } : undefined,
         providerRequestProfiles: cloneProfiles(form.providerRequestProfiles),
         requestLocation: { ...form.requestLocation },
       },
@@ -77,6 +81,7 @@ export function useSettingsForm() {
     if (!saved.value || saving.value)
       return
     Object.assign(form, saved.value.form, {
+      smartScheduling: saved.value.form.smartScheduling ? { ...saved.value.form.smartScheduling } : undefined,
       providerRequestProfiles: cloneProfiles(saved.value.form.providerRequestProfiles),
       requestLocation: { ...saved.value.form.requestLocation },
     })
@@ -119,6 +124,7 @@ export function useSettingsForm() {
   }
 
   function applySettings(data: Awaited<ReturnType<typeof getSettings>>) {
+    form.configRevision = data.configRevision
     savedRequestLocation.value = { ...data.requestLocation }
     form.disableLongContextPricing = data.requestOverrides?.disableLongContextPricing ?? false
     form.subagentRoutingEnabled = data.requestOverrides?.subagentRoutingEnabled ?? false
@@ -134,6 +140,8 @@ export function useSettingsForm() {
     form.concurrencyWaitTimeoutSeconds = data.concurrencyWaitTimeoutSeconds
     form.responsesMaxDecompressedBodyMiB = data.responsesMaxDecompressedBodyBytes / MIB
 
+    form.smartScheduling = { ...data.smartScheduling }
+    smartSchedulingDefaults.value = { ...data.smartSchedulingDefaults }
     form.rotationStrategy = data.rotationStrategy
     form.minCodexDesktopVersion = data.minCodexDesktopVersion ?? ''
     form.providerRequestProfiles = cloneProfiles(data.providerRequestProfiles)
@@ -205,6 +213,9 @@ export function useSettingsForm() {
   }
 
   async function saveSettings() {
+    const smartScheduling = form.smartScheduling
+    if (!smartScheduling)
+      return
     const savedSettings = saved.value
     if (saving.value || loading.value || !savedRequestLocation.value || !savedSettings)
       return
@@ -277,6 +288,7 @@ export function useSettingsForm() {
           subagentRoutingEnabled: form.subagentRoutingEnabled,
           subagentModelMappings: mappingPayload(subagentMappings.value),
         },
+        configRevision: savedSettings.form.configRevision,
         providerRequestProfiles: requestProfileUpdates(
           savedSettings.form.providerRequestProfiles,
           form.providerRequestProfiles,
@@ -293,6 +305,7 @@ export function useSettingsForm() {
         concurrencyWaitTimeoutSeconds,
         responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB * MIB,
         rotationStrategy,
+        smartScheduling: { ...smartScheduling },
         minCodexDesktopVersion: form.minCodexDesktopVersion.trim() || null,
         minCodexCliVersion: form.minCodexCliVersion.trim() || null,
         usageRetentionDays: form.usageRetentionDays,
@@ -313,7 +326,7 @@ export function useSettingsForm() {
       toast.success('设置已保存')
     }, {
       onError: (cause) => {
-        if (cause instanceof ApiError)
+        if (cause instanceof ApiError && cause.status !== 409)
           void loadSettings(true)
       },
     })
@@ -326,6 +339,7 @@ export function useSettingsForm() {
     resetSettings,
     error,
     form,
+    smartSchedulingDefaults,
     mappings,
     subagentMappings,
     addMapping,

@@ -290,6 +290,7 @@ pub struct AccountView {
     pub error_message: Option<String>,
     pub enabled: bool,
     pub concurrency_limit: Option<u32>,
+    pub capacity: AccountCapacityView,
     pub weight: u16,
     pub model_access: gateway_core::account::AccountModelAccess,
     pub access_token_expires_at: Option<String>,
@@ -302,6 +303,13 @@ pub struct AccountView {
     pub updated_at_display: String,
     pub quota: AccountQuotaView,
     pub usage: AccountUsageView,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountCapacityView {
+    pub used_slots: Option<u64>,
+    pub total_slots: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -342,6 +350,10 @@ pub struct AccountQuotaForecastData {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuotaForecastView {
+    pub remaining_tokens: Option<u64>,
+    pub remaining_tokens_display: String,
+    pub remaining_usd: Option<f64>,
+    pub remaining_usd_display: String,
     pub estimated_priced_usd: Option<f64>,
     pub remaining_priced_usd: Option<f64>,
     pub effective_pricing_multiplier: Option<f64>,
@@ -357,10 +369,6 @@ pub struct AccountQuotaForecastView {
     pub estimated_tokens_display: String,
     pub estimated_usd: Option<f64>,
     pub estimated_usd_display: String,
-    pub remaining_tokens: Option<u64>,
-    pub remaining_tokens_display: String,
-    pub remaining_usd: Option<f64>,
-    pub remaining_usd_display: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

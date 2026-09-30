@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gateway_plugin_sdk::{
-    ErrorCode, Frame, Message, Permission, PluginFault, Stage,
+    ErrorCode, Frame, Message, PluginFault,
     client::{read_frame, validate_frame, write_frame},
 };
 use tokio::{
@@ -18,13 +18,12 @@ pub(super) fn start<W, R>(
     control: mpsc::Receiver<Frame>,
     shared: Arc<Shared>,
     callbacks: Arc<dyn CallbackHandler>,
-    permissions: Vec<Permission>,
 ) where
     W: AsyncWrite + Unpin + Send + 'static,
     R: AsyncRead + Unpin + Send + 'static,
 {
     tokio::spawn(write_loop(writer, data, control, Arc::clone(&shared)));
-    tokio::spawn(read_loop(reader, shared, callbacks, permissions));
+    tokio::spawn(read_loop(reader, shared, callbacks));
 }
 
 async fn write_loop<W: AsyncWrite + Unpin>(
@@ -74,7 +73,6 @@ async fn read_loop<R: AsyncRead + Unpin>(
     mut reader: R,
     shared: Arc<Shared>,
     callbacks: Arc<dyn CallbackHandler>,
-    permissions: Vec<Permission>,
 ) {
     let mut stopped = shared.stopped.subscribe();
     let mut last_callback = 0;
@@ -117,15 +115,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     Err(RpcError::Protocol)
                 } else if let Some(context) = shared.context(parent_id) {
                     last_callback = id;
-                    if !callback_allowed(&method, context.stage, &permissions) {
-                        shared.send_control(Frame::control(Message::Error {
-                            id,
-                            error: PluginFault::new(
-                                ErrorCode::PermissionDenied,
-                                "callback is not authorized in this stage",
-                            ),
-                        }));
-                    } else if let Some(permit) = shared.try_callback_slot() {
+                    if let Some(permit) = shared.try_callback_slot() {
                         let handler = Arc::clone(&callbacks);
                         let response = Arc::clone(&shared);
                         let (ready, started) = oneshot::channel();
@@ -189,58 +179,4 @@ async fn read_loop<R: AsyncRead + Unpin>(
             return;
         }
     }
-}
-
-fn callback_allowed(method: &str, stage: Stage, permissions: &[Permission]) -> bool {
-    // 未登录端点只服务声明的公开内容，不能借宿主回调取得管理资源。
-    if stage == Stage::PublicManagement {
-        return false;
-    }
-    if method == "host.log" {
-        return true;
-    }
-    if matches!(stage, Stage::Registration | Stage::Configuration) {
-        return false;
-    }
-    if matches!(
-        method,
-        "host.state.get" | "host.state.put" | "host.state.delete"
-    ) {
-        return true;
-    }
-    // 失败后的策略不得产生额外出站调用或读取账号凭据。
-    if stage == Stage::Retry {
-        return false;
-    }
-    if matches!(
-        method,
-        gateway_plugin_sdk::call::middleware::NEXT_METHOD
-            | gateway_plugin_sdk::call::middleware::BODY_READ_METHOD
-            | gateway_plugin_sdk::call::middleware::BODY_CLOSE_METHOD
-    ) {
-        return matches!(stage, Stage::Request | Stage::Attempt);
-    }
-    let permission = match method {
-        "host.http.do"
-        | "host.http.do_stream"
-        | "host.http.stream_read"
-        | "host.http.stream_close" => Permission::Network,
-        "host.model.execute"
-        | "host.model.execute_stream"
-        | "host.model.stream_read"
-        | "host.model.stream_close"
-        | "host.models.list"
-        | "host.keys.list" => Permission::Models,
-        "host.auth.list" | "host.auth.get_runtime" | "host.auth.get" | "host.auth.save" => {
-            Permission::Accounts
-        }
-        "host.affinity.lookup" => Permission::Requests,
-        "host.data.accounts.list" | "host.data.quota.get"
-            if matches!(stage, Stage::Management | Stage::CommandLine) =>
-        {
-            Permission::Data
-        }
-        _ => return false,
-    };
-    permissions.contains(&permission)
 }

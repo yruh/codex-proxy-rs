@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SystemUpdateChannel, SystemUpdateDetail } from '@/api'
+import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail } from '@/api'
 import { BaseButton, BaseConfirmModal, BaseMarkdown, BaseModal, BasePopover, BaseScrollbar, BaseSegmented, BaseSkeleton, toast } from '@codex-proxy/ui'
 
 import {
@@ -8,15 +8,18 @@ import {
   CircleHelp,
   Download,
   ExternalLink,
+  History,
   Power,
   RefreshCw,
   Terminal,
+  TriangleAlert,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { checkSystemRestart } from '@/api'
 import { normalizeSystemVersion, useSystemUpdateStore } from '@/stores/modules/system-update'
-import { errorMessage } from '@/utils/async'
-import { formatTime } from '@/utils/date'
+import { formatDateTime, formatTime } from '@/utils/format'
+import { errorMessage } from '@/utils/operation'
 import {
   resolveSystemUpdateLogClasses,
   resolveSystemUpdatePresentation,
@@ -34,10 +37,10 @@ const {
   selectedChannel,
   availableChannels,
   canChangeChannel,
-  restartTargetVersion,
   updating,
   restarting,
   updateError,
+  lastFailedOperation,
   needRestart,
   updateLogs,
   updateStreaming,
@@ -52,6 +55,9 @@ const updateConfirmOpen = shallowRef(false)
 const updateConfirmInfo = shallowRef<SystemUpdateDetail | null>(null)
 const updateConfirmPreviousTarget = shallowRef('')
 const preparingUpdate = shallowRef(false)
+const checkingRestart = shallowRef(false)
+const restartConfirmOpen = shallowRef(false)
+const restartPlan = shallowRef<SystemRestartPlan | null>(null)
 
 const presentation = computed(() => resolveSystemUpdatePresentation({
   version: version.value,
@@ -185,11 +191,42 @@ async function handleConfirmUpdate() {
 }
 
 async function handleRestart() {
+  if (checkingRestart.value || restarting.value)
+    return
+  checkingRestart.value = true
   try {
-    await restartNow()
+    if (!updateInfo.value)
+      throw new Error('请等待系统更新信息加载完成')
+    // 文件已更新但旧进程仍在运行时，旧 API 继续使用安装前的兼容预检。
+    if (!updateInfo.value.restartConfirmationSupported) {
+      await restartNow()
+      return
+    }
+    restartPlan.value = await checkSystemRestart()
+    if (restartPlan.value.incompatiblePlugins.length) {
+      restartConfirmOpen.value = true
+      return
+    }
+    await restartNow(restartPlan.value)
   }
   catch (error: unknown) {
-    toast.error(errorMessage(error, '重启失败'))
+    toast.error(errorMessage(error, '重启前检查失败'))
+  }
+  finally {
+    checkingRestart.value = false
+  }
+}
+
+async function handleConfirmRestart() {
+  if (!restartPlan.value)
+    return
+  try {
+    await restartNow(restartPlan.value)
+    restartConfirmOpen.value = false
+  }
+  catch (error: unknown) {
+    restartConfirmOpen.value = false
+    toast.error(errorMessage(error, '重启失败，请重新检查'))
   }
 }
 
@@ -286,9 +323,6 @@ watch(
           </div>
         </div>
 
-        <p v-if="needRestart" class="m-0 text-cp-sm font-emphasis text-cp-success">
-          v{{ restartTargetVersion }} 已安装，重启后生效
-        </p>
         <p v-if="updateInfo?.unsupportedReason" class="m-0 text-cp-sm text-cp-text-secondary">
           {{ updateInfo.unsupportedReason }}
         </p>
@@ -298,6 +332,25 @@ watch(
         >
           {{ updateError || updateInfo?.warning }}
         </p>
+        <BasePopover v-if="lastFailedOperation" placement="bottom-start" class="justify-self-start">
+          <template #trigger>
+            <BaseButton variant="ghost" size="sm">
+              <template #icon>
+                <History class="size-3.5" />
+              </template>
+              上次操作失败
+            </BaseButton>
+          </template>
+          <div class="grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-3 text-cp-sm">
+            <div v-if="lastFailedOperation.targetVersion || lastFailedOperation.finishedAt" class="flex flex-wrap gap-x-3 gap-y-1 text-cp-xs text-cp-text-quaternary">
+              <span v-if="lastFailedOperation.targetVersion">目标版本 v{{ lastFailedOperation.targetVersion }}</span>
+              <span v-if="lastFailedOperation.finishedAt">{{ formatDateTime(lastFailedOperation.finishedAt) }}</span>
+            </div>
+            <p class="m-0 wrap-anywhere text-cp-text-secondary">
+              {{ lastFailedOperation.error || lastFailedOperation.message || '操作失败' }}
+            </p>
+          </div>
+        </BasePopover>
       </section>
 
       <section
@@ -355,7 +408,6 @@ watch(
         </header>
 
         <BaseScrollbar
-          v-if="updateLogRows.length"
           ref="updateLogScrollbar"
           height="260px"
         >
@@ -427,8 +479,8 @@ watch(
       <BaseButton
         v-if="needRestart"
         variant="primary"
-        :loading="restarting"
-        :disabled="updating"
+        :loading="restarting || checkingRestart"
+        :disabled="loading || updating || restartConfirmOpen"
         @click="handleRestart"
       >
         <template #icon>
@@ -450,6 +502,31 @@ watch(
       </BaseButton>
     </template>
   </BaseModal>
+
+  <BaseConfirmModal
+    v-model="restartConfirmOpen"
+    title="发现不兼容插件"
+    description="配置与数据保留，兼容后可启用"
+    confirm-text="停用并重启"
+    :loading="restarting"
+    @confirm="handleConfirmRestart"
+  >
+    <div class="grid gap-4">
+      <div v-if="restartPlan?.targetVersion" class="flex items-center justify-between gap-3 text-cp-sm">
+        <span class="text-cp-text-secondary">重启后版本</span>
+        <span class="font-mono font-emphasis text-cp-text">v{{ restartPlan.targetVersion }}</span>
+      </div>
+      <ul class="m-0 max-h-64 list-none overflow-y-auto p-0" aria-label="不兼容插件">
+        <li v-for="plugin in restartPlan?.incompatiblePlugins" :key="plugin.instanceId" class="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+          <TriangleAlert class="mt-0.5 size-4 shrink-0 text-cp-warning" aria-hidden="true" />
+          <div class="grid min-w-0 gap-1">
+            <strong class="wrap-anywhere text-cp-sm font-heavy text-cp-text">{{ plugin.name }}</strong>
+            <span class="wrap-anywhere text-cp-xs leading-relaxed font-normal text-cp-text-secondary">{{ plugin.reason }}</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </BaseConfirmModal>
 
   <BaseConfirmModal
     v-model="updateConfirmOpen"

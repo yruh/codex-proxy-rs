@@ -140,6 +140,10 @@ export interface Account {
   errorMessage: string | null
   enabled: boolean
   concurrencyLimit: number | null
+  capacity: {
+    usedSlots: number | null
+    totalSlots: number | null
+  }
   weight: number
   modelAccess: AccountModelAccess
   accessTokenExpiresAt: string | null
@@ -166,6 +170,10 @@ export interface AccountCapabilities {
 }
 
 export interface AccountQuotaForecast {
+  remainingTokens: number | null
+  remainingTokensDisplay: string
+  remainingUsd: number | null
+  remainingUsdDisplay: string
   estimatedPricedUsd?: number | null
   remainingPricedUsd?: number | null
   effectivePricingMultiplier?: number | null
@@ -190,10 +198,6 @@ export interface AccountQuotaForecast {
   estimatedTokensDisplay: string
   estimatedUsd: number | null
   estimatedUsdDisplay: string
-  remainingTokens: number | null
-  remainingTokensDisplay: string
-  remainingUsd: number | null
-  remainingUsdDisplay: string
 }
 
 export interface AccountQuotaForecastResponse {

@@ -13,7 +13,6 @@ fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettingsUpdate {
         request_profile_updates: BTreeMap::new(),
         request_location_enabled: false,
         request_location: Default::default(),
-        admin_api_key: None,
         refresh_margin_seconds,
         refresh_concurrency: 2,
         max_concurrent_per_account: 3,
@@ -22,6 +21,7 @@ fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettingsUpdate {
         max_waiting_per_account: 0,
         concurrency_wait_timeout_seconds: 30,
         responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
+        smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
         rotation_strategy: "smart".to_owned(),
         model_mappings: BTreeMap::from([
             ("gpt-5.4".to_owned(), "gpt-5.5".to_owned()),
@@ -49,6 +49,39 @@ fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettingsUpdate {
 fn runtime_settings_keep_account_rotation_global() {
     let settings = settings_with_margin(3_600);
     assert!(settings.validate().is_ok());
+}
+
+#[tokio::test]
+async fn smart_settings_upgrade_preserves_selection_and_publishes_custom_config() {
+    use gateway_core::account::SmartSchedulingConfig;
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create_through("smart_config", 18).await else {
+        return;
+    };
+    // 升级前不能用包含新列的 Repository，直接写入旧版本已有字段。
+    sqlx::query("update runtime_settings set rotation_strategy = 'sticky', refresh_margin_seconds = 3600 where id = 1")
+        .execute(&database.pool).await.unwrap();
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let before = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(before.rotation_strategy, "sticky");
+    assert_eq!(before.refresh_margin_seconds, 3600);
+    assert_eq!(before.smart_scheduling, SmartSchedulingConfig::default());
+    let mut update = settings_with_margin(3600);
+    update.smart_scheduling =
+        SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3], true).unwrap();
+    let expected = update.smart_scheduling;
+    repository.update_runtime_settings(update).await.unwrap();
+    let reloaded = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(reloaded.smart_scheduling, expected);
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert_eq!(snapshot.settings.smart_scheduling, expected);
+    assert!(snapshot.config_revision > before.config_revision);
+    assert_eq!(before.smart_scheduling, SmartSchedulingConfig::default());
+    database.close().await;
 }
 
 #[test]
@@ -767,5 +800,101 @@ async fn request_profile_projection_is_revision_consistent_and_includes_key_over
         .await
         .unwrap_err();
     assert_eq!(error.kind(), ProviderStoreErrorKind::Conflict);
+    database.close().await;
+}
+
+#[tokio::test]
+async fn control_plane_replacement_commits_one_writer_per_revision_and_preserves_newer_settings() {
+    use gateway_store::postgres::{
+        AdminAuditActorKind, AdminAuditEvent, ControlPlaneReplacement, ControlPlaneRepository,
+        PgControlPlaneRepository,
+    };
+    use gateway_store::{ConflictKind, StoreError};
+    let Some(database) = TestDatabase::create("settings_compare_replace").await else {
+        return;
+    };
+    let repository = PgControlPlaneRepository::new(database.pool.clone());
+    let revision = repository
+        .load_control_plane()
+        .await
+        .unwrap()
+        .settings
+        .config_revision;
+    let replacement = |id: &str, margin| ControlPlaneReplacement {
+        expected_revision: revision,
+        settings: settings_with_margin(margin),
+        audit: AdminAuditEvent {
+            id: id.into(),
+            actor_kind: AdminAuditActorKind::System,
+            actor_admin_user_id: None,
+            actor_ref: "system".into(),
+            admin_request_id: Some(id.into()),
+            action: "settings.replace".into(),
+            entity_kind: "runtime_settings".into(),
+            entity_ref: "1".into(),
+            config_revision: None,
+            changed_fields: vec!["refresh_margin_seconds".into()],
+            created_at: Utc::now(),
+        },
+    };
+    let (first, second) = tokio::join!(
+        repository.replace_control_plane(replacement("first", 1800)),
+        repository.replace_control_plane(replacement("second", 7200)),
+    );
+    let (saved, conflict) = match (first, second) {
+        (Ok(saved), Err(error)) | (Err(error), Ok(saved)) => (saved.settings, error),
+        other => panic!("expected exactly one successful transaction: {other:?}"),
+    };
+    assert!(matches!(
+        conflict,
+        StoreError::Conflict {
+            kind: ConflictKind::StaleRevision,
+            ..
+        }
+    ));
+    let current = repository.load_control_plane().await.unwrap().settings;
+    assert_eq!(current.config_revision.get(), revision.get() + 1);
+    assert_eq!(current.refresh_margin_seconds, saved.refresh_margin_seconds);
+    let audit_count: i64 = sqlx::query_scalar(
+        "select count(*) from admin_audit_events where action = 'settings.replace'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_count, 1);
+    // API Key 更新也推进相同版本，旧设置快照不能复活已经替换的 Key。
+    let mut key_audit = replacement("key", 3600).audit;
+    key_audit.action = "settings.admin_key".into();
+    repository
+        .replace_admin_api_key(Some("new-test-key".into()), key_audit)
+        .await
+        .unwrap();
+    let mut stale = replacement("stale", 3600);
+    stale.expected_revision = saved.config_revision;
+    assert!(matches!(
+        repository.replace_control_plane(stale).await,
+        Err(StoreError::Conflict {
+            kind: ConflictKind::StaleRevision,
+            ..
+        })
+    ));
+    let mut fresh = replacement("fresh", 3600);
+    fresh.expected_revision = repository
+        .load_control_plane()
+        .await
+        .unwrap()
+        .settings
+        .config_revision;
+    repository.replace_control_plane(fresh).await.unwrap();
+    assert_eq!(
+        repository
+            .load_control_plane()
+            .await
+            .unwrap()
+            .settings
+            .admin_api_key
+            .as_deref(),
+        Some("new-test-key")
+    );
     database.close().await;
 }

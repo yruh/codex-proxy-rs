@@ -32,6 +32,7 @@ pub struct RuntimeSettings {
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
     pub responses_max_decompressed_body_bytes: u64,
+    pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
     pub rotation_strategy: String,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
@@ -126,7 +127,6 @@ pub struct RuntimeSettingsUpdate {
         gateway_core::routing::ProviderKind,
         Option<gateway_core::account::OpaqueProviderData>,
     >,
-    pub admin_api_key: Option<String>,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u32,
     pub max_concurrent_per_account: u32,
@@ -135,6 +135,7 @@ pub struct RuntimeSettingsUpdate {
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
     pub responses_max_decompressed_body_bytes: u64,
+    pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
     pub rotation_strategy: String,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
@@ -160,10 +161,6 @@ impl fmt::Debug for RuntimeSettingsUpdate {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RuntimeSettingsUpdate")
-            .field(
-                "admin_api_key",
-                &self.admin_api_key.as_ref().map(|_| "[REDACTED]"),
-            )
             .field("rotation_strategy", &self.rotation_strategy)
             .field("request_location_enabled", &self.request_location_enabled)
             .field("request_location", &self.request_location)
@@ -265,7 +262,7 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
             "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled,
                     refresh_concurrency, max_concurrent_per_account, request_interval_ms,
-                    rotation_strategy, model_mappings_json, usage_retention_days, ops_event_retention_days,
+                    rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
                     min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds,
                     account_auto_freeze_enabled, account_auto_freeze_threshold,
@@ -417,7 +414,7 @@ pub(crate) async fn load_runtime_settings_in_transaction(
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
         "select request_overrides_json, provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled,
                 refresh_concurrency, max_concurrent_per_account, request_interval_ms,
-                rotation_strategy, model_mappings_json, usage_retention_days, ops_event_retention_days,
+                rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
                 min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds,
                 account_auto_freeze_enabled, account_auto_freeze_threshold,
@@ -465,41 +462,40 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     let next = sqlx::query_scalar::<_, i64>(
         "update runtime_settings
              set config_revision = config_revision + 1,
-	                 admin_api_key = $1,
-	                 refresh_margin_seconds = $2,
-	                 refresh_concurrency = $3,
-	                 max_concurrent_per_account = $4,
-	                 request_interval_ms = $5,
-	                 rotation_strategy = $6,
-	                 model_mappings_json = $7,
-	                 usage_retention_days = $8,
-	                 ops_event_retention_days = $9,
-	                 audit_retention_days = $10,
-	                 min_codex_desktop_version = $11,
-	                 min_codex_cli_version = $12,
-                     max_waiting_per_key = $13,
-                     max_waiting_per_account = $14,
-                     concurrency_wait_timeout_seconds = $15,
-                     account_auto_freeze_enabled = $16,
-                     account_auto_freeze_threshold = $17,
-                     account_auto_freeze_window_seconds = $18,
-                     account_auto_freeze_duration_seconds = $19,
-                     account_auto_freeze_probe_enabled = $20,
-                     account_auto_freeze_probe_model = $21,
-                     account_auto_freeze_adaptive_concurrency = $22,
-                     request_location_json = $23,
-                     request_location_enabled = $24,
-                     responses_max_decompressed_body_bytes = $25,
-	                 provider_request_profiles_json = (provider_request_profiles_json - $26::text[]) || $27::jsonb,
-                     account_warmup_enabled = $28,
-                     account_warmup_schedule_time = $29,
-                     account_warmup_model = $30,
+	                 refresh_margin_seconds = $1,
+	                 refresh_concurrency = $2,
+	                 max_concurrent_per_account = $3,
+	                 request_interval_ms = $4,
+	                 rotation_strategy = $5,
+	                 model_mappings_json = $6,
+	                 usage_retention_days = $7,
+	                 ops_event_retention_days = $8,
+	                 audit_retention_days = $9,
+	                 min_codex_desktop_version = $10,
+	                 min_codex_cli_version = $11,
+                     max_waiting_per_key = $12,
+                     max_waiting_per_account = $13,
+                     concurrency_wait_timeout_seconds = $14,
+                     account_auto_freeze_enabled = $15,
+                     account_auto_freeze_threshold = $16,
+                     account_auto_freeze_window_seconds = $17,
+                     account_auto_freeze_duration_seconds = $18,
+                     account_auto_freeze_probe_enabled = $19,
+                     account_auto_freeze_probe_model = $20,
+                     account_auto_freeze_adaptive_concurrency = $21,
+                     request_location_json = $22,
+                     request_location_enabled = $23,
+                     responses_max_decompressed_body_bytes = $24,
+	                 provider_request_profiles_json = (provider_request_profiles_json - $25::text[]) || $26::jsonb,
+                     account_warmup_enabled = $27,
+                     account_warmup_schedule_time = $28,
+                     account_warmup_model = $29,
+                     smart_scheduling_json = $30,
                      request_overrides_json = coalesce($31, request_overrides_json),
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
     )
-    .bind(update.admin_api_key.as_deref())
     .bind(refresh_margin_seconds)
     .bind(i64::from(update.refresh_concurrency))
     .bind(i64::from(update.max_concurrent_per_account))
@@ -541,6 +537,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(update.account_warmup_enabled)
     .bind(&update.account_warmup_schedule_time)
     .bind(update.account_warmup_model.as_deref())
+    .bind(sqlx::types::Json(update.smart_scheduling))
     .bind(update.request_overrides.as_ref().map(sqlx::types::Json))
     .fetch_optional(&mut **transaction)
     .await
@@ -601,6 +598,7 @@ struct RuntimeSettingsRow {
     refresh_concurrency: i64,
     max_concurrent_per_account: i64,
     request_interval_ms: i64,
+    smart_scheduling_json: sqlx::types::Json<gateway_core::account::SmartSchedulingConfig>,
     rotation_strategy: String,
     request_location_enabled: bool,
     request_location_json: sqlx::types::Json<gateway_core::account::RequestLocation>,
@@ -649,6 +647,7 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
         refresh_concurrency: to_u32(row.refresh_concurrency)?,
         max_concurrent_per_account: to_u32(row.max_concurrent_per_account)?,
         request_interval_ms: to_u64(row.request_interval_ms)?,
+        smart_scheduling: row.smart_scheduling_json.0,
         rotation_strategy: row.rotation_strategy,
         request_overrides: row.request_overrides_json.0,
         request_location_enabled: row.request_location_enabled,

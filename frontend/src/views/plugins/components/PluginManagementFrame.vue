@@ -15,7 +15,7 @@ import {
 import { API_BASE_URL } from '@/api/constants'
 import { ApiError } from '@/api/request'
 import { useThemeStore } from '@/stores/modules/theme'
-import { errorMessage } from '@/utils/async'
+import { errorMessage, generateRequestId } from '@/utils/operation'
 import {
   assemblePluginManagementPage,
   MAXIMUM_MANAGEMENT_BODY_BYTES,
@@ -78,26 +78,6 @@ const emit = defineEmits<{
   stale: []
 }>()
 
-const SAFE_MODEL_RESPONSE_HEADERS = new Set([
-  'content-type',
-  'openai-processing-ms',
-  'openai-request-id',
-  'request-id',
-  'retry-after',
-  'x-client-request-id',
-  'x-gateway-request-id',
-  'x-oai-request-id',
-  'x-openai-request-id',
-  'x-processing-ms',
-  'x-request-id',
-  'x-ratelimit-limit-requests',
-  'x-ratelimit-limit-tokens',
-  'x-ratelimit-remaining-requests',
-  'x-ratelimit-remaining-tokens',
-  'x-ratelimit-reset-requests',
-  'x-ratelimit-reset-tokens',
-])
-
 const themeStore = useThemeStore()
 const containerRef = useTemplateRef<HTMLDivElement>('container')
 const iframeRef = useTemplateRef<HTMLIFrameElement>('iframe')
@@ -131,8 +111,8 @@ async function loadPage() {
   loading.value = true
   loadError.value = ''
   const controller = new AbortController()
-  const channel = crypto.randomUUID()
-  const sessionId = crypto.randomUUID()
+  const channel = generateRequestId()
+  const sessionId = generateRequestId()
   try {
     await nextTick()
     if (sequence !== loadSequence)
@@ -378,23 +358,8 @@ function validateModelRequestPayload(payload: unknown) {
 }
 
 function modelResponseHeaders(response: Response) {
-  const headers: [string, string][] = []
-  let total = 0
-  for (const [rawName, value] of response.headers) {
-    const name = rawName.toLowerCase()
-    const nextTotal = total + name.length + value.length
-    if (
-      !SAFE_MODEL_RESPONSE_HEADERS.has(name)
-      || value.length > 8192
-      || nextTotal > 32768
-      || hasControlCharacter(value.replaceAll('\t', ''))
-    ) {
-      continue
-    }
-    headers.push([name, value])
-    total = nextTotal
-  }
-  return headers
+  // 完整转交浏览器可读取的响应头；浏览器自身的 Headers 合同仍然适用。
+  return Array.from(response.headers.entries())
 }
 
 function supportedModelResponse(response: Response) {

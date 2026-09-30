@@ -12,18 +12,21 @@ use gateway_core::engine::middleware::{
     MiddlewareBody, MiddlewareError, MiddlewareFrame, MiddlewareFraming, MiddlewareHeader,
     MiddlewareResponse,
 };
+use gateway_core::engine::response_control::ResponseControl;
 use gateway_core::error::{GatewayError, GatewayErrorKind};
 use gateway_core::event::ProviderResponseHeader;
 use gateway_core::operation::ProviderSessionState;
 
 use crate::openai::error::{gateway_error_contract, gateway_error_from_engine};
-use crate::openai::middleware::PendingExecution;
+use crate::openai::middleware::{PendingExecution, pending_execution_response};
 use crate::openai::responses::validation::{ResponseValidationFacts, ResponsesDeliveryValidator};
 
 use super::{
     super::{DecodedResponsesRequest, OpenAiResponsesEncoder, ProtocolErrorBody},
-    connection::{FramePhase, ResponsesWebSocketConnection, WriteContext},
-    protocol::{error_event, initial_engine_error_event, response_metadata_event},
+    connection::{ConnectionEvent, FramePhase, ResponsesWebSocketConnection, WriteContext},
+    protocol::{
+        decode_response_interrupt, error_event, initial_engine_error_event, response_metadata_event,
+    },
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -89,17 +92,17 @@ pub(super) async fn execution_response(
         let headers = body.response_headers().to_vec();
         let status = middleware_error_status(&error);
         let _ = body.record_client_status(status).await;
-        Box::new(body).close().await;
         if let MiddlewareError::Engine(error) = error {
             let response_headers = headers
                 .iter()
                 .map(|header| MiddlewareHeader::new(header.name(), header.value().clone()))
                 .collect();
-            return Ok(MiddlewareResponse::new(
+            // 失败也要保留会话到洋葱链返回，否则释放会话会取消仍在等待 next 的插件。
+            return Ok(pending_execution_response(
                 "openai".to_owned(),
                 status,
                 response_headers,
-                Box::new(SingleFrameBody(Some(MiddlewareFrame::new(
+                MiddlewareFrame::new(
                     Bytes::from(initial_engine_error_event(
                         &error,
                         request_id.as_ref(),
@@ -107,9 +110,11 @@ pub(super) async fn execution_response(
                     )),
                     MiddlewareFraming::JsonDocument,
                     true,
-                )))),
+                ),
+                body.execution,
             ));
         }
+        Box::new(body).close().await;
         return Err(error);
     }
     let headers = body
@@ -125,18 +130,6 @@ pub(super) async fn execution_response(
     ))
 }
 
-struct SingleFrameBody(Option<MiddlewareFrame>);
-
-impl MiddlewareBody for SingleFrameBody {
-    fn next_frame(&mut self) -> BoxFuture<'_, Result<Option<MiddlewareFrame>, MiddlewareError>> {
-        Box::pin(async { Ok(self.0.take()) })
-    }
-
-    fn close(self: Box<Self>) -> BoxFuture<'static, ()> {
-        Box::pin(async move { drop(self) })
-    }
-}
-
 pub(super) async fn forward_response(
     connection: &mut ResponsesWebSocketConnection,
     response: MiddlewareResponse,
@@ -144,6 +137,7 @@ pub(super) async fn forward_response(
     replay: &mut ConnectionReplaySnapshot,
     capture: ReplayCaptureHandle,
     validation: ResponseValidationFacts,
+    response_control: ResponseControl,
 ) -> ForwardOutcome {
     let (protocol, status, headers, mut body, _) = response.into_parts();
     if protocol != "openai" || StatusCode::from_u16(status).is_err() {
@@ -156,7 +150,9 @@ pub(super) async fn forward_response(
             ProviderResponseHeader::new(name, value)
         })
         .collect::<Vec<_>>();
-    let first = match next_body_input(connection, body.as_mut()).await {
+    let first = match next_body_input(connection, body.as_mut(), &response_control, &request_id)
+        .await
+    {
         BodyInput::Frame(Ok(Some(frame))) => frame,
         BodyInput::Frame(Ok(None)) => {
             return fail_body(connection, body, MiddlewareError::InvalidState, &request_id).await;
@@ -200,10 +196,33 @@ pub(super) async fn forward_response(
     loop {
         let frame = match current.take() {
             Some(frame) => frame,
-            None => match next_body_input(connection, body.as_mut()).await {
-                BodyInput::Frame(Ok(Some(frame))) => frame,
-                BodyInput::Frame(Ok(None)) if terminal_seen && body.is_finalized() => {
-                    if delivery_validator.finish_websocket_delivery().is_err() {
+            None => {
+                match next_body_input(connection, body.as_mut(), &response_control, &request_id)
+                    .await
+                {
+                    BodyInput::Frame(Ok(Some(frame))) => frame,
+                    BodyInput::Frame(Ok(None)) if terminal_seen && body.is_finalized() => {
+                        if delivery_validator.finish_websocket_delivery().is_err() {
+                            return fail_body(
+                                connection,
+                                body,
+                                MiddlewareError::InvalidState,
+                                &request_id,
+                            )
+                            .await;
+                        }
+                        {
+                            let captured = capture
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if let Some(response_id) = captured.response_id.clone() {
+                                replay.commit(response_id, captured.provider_state.clone());
+                            }
+                        }
+                        body.close().await;
+                        return ForwardOutcome::Continue;
+                    }
+                    BodyInput::Frame(Ok(None)) => {
                         return fail_body(
                             connection,
                             body,
@@ -212,29 +231,15 @@ pub(super) async fn forward_response(
                         )
                         .await;
                     }
-                    {
-                        let captured = capture
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        if let Some(response_id) = captured.response_id.clone() {
-                            replay.commit(response_id, captured.provider_state.clone());
-                        }
+                    BodyInput::Frame(Err(error)) => {
+                        return fail_body(connection, body, error, &request_id).await;
                     }
-                    body.close().await;
-                    return ForwardOutcome::Continue;
+                    BodyInput::Disconnect => {
+                        detach_body(body);
+                        return ForwardOutcome::Disconnect;
+                    }
                 }
-                BodyInput::Frame(Ok(None)) => {
-                    return fail_body(connection, body, MiddlewareError::InvalidState, &request_id)
-                        .await;
-                }
-                BodyInput::Frame(Err(error)) => {
-                    return fail_body(connection, body, error, &request_id).await;
-                }
-                BodyInput::Disconnect => {
-                    detach_body(body);
-                    return ForwardOutcome::Disconnect;
-                }
-            },
+            }
         };
         if terminal_seen || validate_frame(&frame).is_err() {
             return fail_body(connection, body, MiddlewareError::InvalidState, &request_id).await;
@@ -257,15 +262,17 @@ pub(super) async fn forward_response(
             (true, true) => FramePhase::Terminal,
             (true, false) => FramePhase::Data,
         };
-        if connection
+        match connection
             .send_text(message, WriteContext::request(&request_id, phase))
             .await
-            .is_err()
         {
-            detach_body(body);
-            return ForwardOutcome::Disconnect;
+            Ok(super::connection::WriteOutcome::Written) => first_frame_written = true,
+            Ok(super::connection::WriteOutcome::Suppressed) => {}
+            Err(_) => {
+                detach_body(body);
+                return ForwardOutcome::Disconnect;
+            }
         }
-        first_frame_written = true;
         terminal_seen = terminal;
     }
 }
@@ -293,11 +300,45 @@ enum BodyInput {
 async fn next_body_input(
     connection: &mut ResponsesWebSocketConnection,
     body: &mut dyn MiddlewareBody,
+    response_control: &ResponseControl,
+    request_id: &Arc<str>,
 ) -> BodyInput {
-    tokio::select! {
-        biased;
-        _ = connection.wait_for_exit() => BodyInput::Disconnect,
-        frame = body.next_frame() => BodyInput::Frame(frame),
+    // 处理控制帧时继续持有同一个读取 future，不能取消正在加工正文的中间件。
+    let frame = body.next_frame();
+    tokio::pin!(frame);
+    loop {
+        tokio::select! {
+            event = connection.next_active_event() => {
+                let Some(event) = event else { return BodyInput::Disconnect; };
+                match &event.event {
+                    ConnectionEvent::Text(payload) => {
+                        let error = match decode_response_interrupt(payload) {
+                            Ok(Some(response_id)) => response_control.interrupt(&response_id).err().map(|_| {
+                                super::super::RequestDecodeError::InvalidValue { field: "response_id".to_owned() }.protocol_body()
+                            }),
+                            Ok(None) => {
+                                connection.defer(event);
+                                continue;
+                            }
+                            Err(error) => Some(error.protocol_body()),
+                        };
+                        if let Some(error) = error
+                            && send_protocol_error(connection, StatusCode::BAD_REQUEST, error, request_id).await == ForwardOutcome::Disconnect
+                        {
+                            return BodyInput::Disconnect;
+                        }
+                    }
+                    ConnectionEvent::Expired => {
+                        // 允许当前响应收尾，外层仍会在下一轮准入前关闭过期连接。
+                    }
+                    ConnectionEvent::Binary => {
+                        connection.defer(event);
+                    }
+                    ConnectionEvent::Exited(_) => return BodyInput::Disconnect,
+                }
+            }
+            frame = &mut frame => return BodyInput::Frame(frame),
+        }
     }
 }
 
@@ -320,14 +361,18 @@ fn middleware_gateway_error(error: MiddlewareError) -> GatewayError {
         MiddlewareError::Gateway(error) => error,
         MiddlewareError::Engine(error) => gateway_error_from_engine(&error),
         MiddlewareError::Provider(error) => GatewayError::from_provider(&error),
-        MiddlewareError::Rejected => GatewayError::new(
-            GatewayErrorKind::PolicyDenied,
-            "request middleware rejected the request",
-        ),
-        MiddlewareError::Fault | MiddlewareError::InvalidState => GatewayError::new(
-            GatewayErrorKind::Internal,
-            "request middleware returned an invalid response",
-        ),
+        MiddlewareError::Rejected | MiddlewareError::Remote { rejected: true, .. } => {
+            GatewayError::new(
+                GatewayErrorKind::PolicyDenied,
+                "request middleware rejected the request",
+            )
+        }
+        MiddlewareError::Fault | MiddlewareError::Remote { .. } | MiddlewareError::InvalidState => {
+            GatewayError::new(
+                GatewayErrorKind::Internal,
+                "request middleware returned an invalid response",
+            )
+        }
     }
 }
 
@@ -344,8 +389,10 @@ fn middleware_error_status(error: &MiddlewareError) -> u16 {
                 .0
                 .as_u16()
         }
-        MiddlewareError::Rejected => StatusCode::FORBIDDEN.as_u16(),
-        MiddlewareError::Fault | MiddlewareError::InvalidState => {
+        MiddlewareError::Rejected | MiddlewareError::Remote { rejected: true, .. } => {
+            StatusCode::FORBIDDEN.as_u16()
+        }
+        MiddlewareError::Fault | MiddlewareError::Remote { .. } | MiddlewareError::InvalidState => {
             StatusCode::INTERNAL_SERVER_ERROR.as_u16()
         }
     }

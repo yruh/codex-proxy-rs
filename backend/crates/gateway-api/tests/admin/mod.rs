@@ -35,7 +35,7 @@ use gateway_admin::{
             NewClientKey, SetClientKeyEnabled, UpdateClientKey,
         },
         observability::{
-            DashboardObservation, DecimalAmount, DiagnosticDimension, DiagnosticObservation,
+            DashboardObservation, DecimalAmount, DiagnosticDimension, DiagnosticsObservation,
             OpsError, OpsErrorPage, OpsErrorQuery, RequestMetricPoint, TimeRange, UsageDetail,
             UsageFilter, UsageListRecord, UsageOverview, UsagePage, UsageQuery,
         },
@@ -101,7 +101,7 @@ pub(super) struct AdminTestFixture {
     pub settings: Arc<MemorySettingsStore>,
     pub usage_records: Arc<Mutex<Vec<UsageListRecord>>>,
     pub usage_detail: Arc<Mutex<Option<UsageDetail>>>,
-    pub diagnostics: Arc<Mutex<Vec<DiagnosticObservation>>>,
+    pub diagnostics: Arc<Mutex<DiagnosticsObservation>>,
     pub ops_errors: Arc<Mutex<Vec<OpsError>>>,
     pub dashboard_observation: Arc<Mutex<Option<DashboardObservation>>>,
     pub dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
@@ -138,7 +138,7 @@ impl AdminTestFixture {
         let account_groups = Arc::new(MemoryAccountGroupStore::new());
         let usage_records = Arc::new(Mutex::new(Vec::new()));
         let usage_detail = Arc::new(Mutex::new(None));
-        let diagnostics = Arc::new(Mutex::new(Vec::new()));
+        let diagnostics = Arc::new(Mutex::new(DiagnosticsObservation::default()));
         let ops_errors = Arc::new(Mutex::new(Vec::new()));
         let dashboard_observation = Arc::new(Mutex::new(None));
         let dashboard_summary_range = Arc::new(Mutex::new(None));
@@ -170,6 +170,7 @@ impl AdminTestFixture {
             gateway_admin::ports::backup::BackupStorePorts::disabled(),
             plugin_ports.clone(),
             plugin_ports.clone(),
+            plugin_ports.clone(),
         );
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
             Arc::new(UnusedProvider::new("openai", Arc::clone(&provider_error))),
@@ -184,6 +185,7 @@ impl AdminTestFixture {
             ClientConfig::default(),
             stores,
             gateway_admin::AdminRuntimePorts {
+                service_middleware: std::sync::Arc::new(|| None),
                 plugin_preparation: plugin_ports.clone(),
                 plugin_management: plugin_ports.clone(),
                 published_snapshot: published_snapshot.clone(),
@@ -535,6 +537,13 @@ impl SettingsStore for MemorySettingsStore {
         _: &MutationContext,
     ) -> AdminStoreResult<RuntimeSettings> {
         let mut settings = self.settings.lock().expect("settings");
+        if command.expected_revision != settings.config_revision {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Conflict,
+                "runtime settings",
+                "settings revision changed",
+            ));
+        }
         let mut request_profiles = settings.request_profiles.clone();
         for (provider, profile) in command.request_profile_updates {
             if let Some(profile) = profile {
@@ -560,6 +569,7 @@ impl SettingsStore for MemorySettingsStore {
             max_waiting_per_account: command.max_waiting_per_account,
             concurrency_wait_timeout_seconds: command.concurrency_wait_timeout_seconds,
             responses_max_decompressed_body_bytes: command.responses_max_decompressed_body_bytes,
+            smart_scheduling: command.smart_scheduling,
             rotation_strategy: command.rotation_strategy,
             min_codex_desktop_version: command.min_codex_desktop_version,
             min_codex_cli_version: command.min_codex_cli_version,
@@ -865,9 +875,23 @@ fn mutation(
 
 #[async_trait]
 impl ClientKeyStore for MemoryClientKeyStore {
+    async fn update_client_key_budget_limits(
+        &self,
+        _: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,
+        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
+        _: &MutationContext,
+    ) -> AdminStoreResult<Option<Revision>> {
+        Err(AdminStoreError::new(
+            AdminStoreErrorKind::Unavailable,
+            "client key",
+            "unused budget update",
+        ))
+    }
+
     async fn reset_client_key_budget(
         &self,
         command: gateway_admin::model::client_keys::ResetClientKeyBudget,
+        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
         _: &MutationContext,
     ) -> AdminStoreResult<()> {
         use gateway_admin::model::client_keys::ClientKeyBudgetPeriod;
@@ -980,7 +1004,7 @@ struct UnusedStore {
     observations: Arc<Mutex<MemoryObservations>>,
     usage_records: Arc<Mutex<Vec<UsageListRecord>>>,
     usage_detail: Arc<Mutex<Option<UsageDetail>>>,
-    diagnostics: Arc<Mutex<Vec<DiagnosticObservation>>>,
+    diagnostics: Arc<Mutex<DiagnosticsObservation>>,
     ops_errors: Arc<Mutex<Vec<OpsError>>>,
     dashboard_observation: Arc<Mutex<Option<DashboardObservation>>>,
     dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
@@ -1028,6 +1052,9 @@ impl AccountStore for UnusedStore {
         _: TimeRange,
         _: &[String],
     ) -> AdminStoreResult<Vec<AccountUsage>> {
+        if self.account.lock().expect("account").is_some() {
+            return Ok(Vec::new());
+        }
         Err(unavailable("account usage"))
     }
 
@@ -1289,7 +1316,7 @@ impl ObservabilityStore for UnusedStore {
         _: TimeRange,
         _: UsageFilter,
         _: DiagnosticDimension,
-    ) -> AdminStoreResult<Vec<DiagnosticObservation>> {
+    ) -> AdminStoreResult<DiagnosticsObservation> {
         Ok(self.diagnostics.lock().expect("diagnostics").clone())
     }
 
@@ -1413,7 +1440,12 @@ impl ProviderAdmin for UnusedProvider {
         &self,
         _: gateway_admin::model::provider_credentials::ProviderQuotaRequest,
     ) -> Result<ProviderQuota, ProviderAdminError> {
-        Err(unsupported_provider())
+        Err(self
+            .error
+            .lock()
+            .expect("provider error")
+            .clone()
+            .unwrap_or_else(unsupported_provider))
     }
 
     async fn models(
@@ -1492,7 +1524,10 @@ impl SystemOperations for UnusedSystem {
         Err(unavailable_system())
     }
 
-    async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn restart(
+        &self,
+        _preflight: Arc<dyn gateway_admin::ports::system::SystemRestartPreflight>,
+    ) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }
 }
@@ -1523,6 +1558,7 @@ fn test_runtime_settings() -> RuntimeSettings {
         max_waiting_per_account: 0,
         concurrency_wait_timeout_seconds: 30,
         responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
+        smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
         rotation_strategy: RotationStrategy::Smart,
         min_codex_desktop_version: None,
         min_codex_cli_version: None,

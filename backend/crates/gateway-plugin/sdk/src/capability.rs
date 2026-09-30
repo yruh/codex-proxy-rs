@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Deserializer, Serialize, de};
 
-/// 能力只声明可提供的行为，不等于管理员授予的回调权限。
+/// 能力描述插件提供的处理器，不承担宿主资源授权。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
@@ -12,14 +12,32 @@ pub enum Capability {
     ModelCatalog,
     RetryPolicy,
     Middleware,
-    RequestLifecycle,
-    WebSocketObserver,
-    Usage,
+    UpstreamAdapter,
+    Observer,
     CommandLine,
     Management,
+    Maintenance,
 }
 
 impl Capability {
+    /// SDK 能描述的行为合同版本；具体宿主可以只开放其中一部分。
+    #[must_use]
+    pub const fn contract_versions(self) -> &'static [u32] {
+        match self {
+            Self::Middleware => &[3],
+            Self::FrontendAuthentication
+            | Self::Scheduler
+            | Self::ModelRouter
+            | Self::ModelCatalog
+            | Self::RetryPolicy
+            | Self::Observer
+            | Self::CommandLine
+            | Self::Management
+            | Self::Maintenance => &[1],
+            Self::UpstreamAdapter => &[1],
+        }
+    }
+
     /// 稳定能力标识；默认扩展项 ID 由它派生，不受显示名称影响。
     #[must_use]
     pub const fn identifier(self) -> &'static str {
@@ -30,15 +48,15 @@ impl Capability {
             Self::ModelCatalog => "model_catalog",
             Self::RetryPolicy => "retry_policy",
             Self::Middleware => "middleware",
-            Self::RequestLifecycle => "request_lifecycle",
-            Self::WebSocketObserver => "web_socket_observer",
-            Self::Usage => "usage",
+            Self::UpstreamAdapter => "upstream_adapter",
+            Self::Observer => "observer",
             Self::CommandLine => "command_line",
             Self::Management => "management",
+            Self::Maintenance => "maintenance",
         }
     }
 
-    /// 固定调用阶段；只有中间件需要作者显式选择 request／attempt。
+    /// 固定调用阶段；只有中间件需要作者显式选择挂载边界。
     #[must_use]
     pub const fn fixed_stages(self) -> &'static [Stage] {
         match self {
@@ -48,14 +66,16 @@ impl Capability {
             Self::ModelCatalog => &[Stage::Registration],
             Self::RetryPolicy => &[Stage::Retry],
             Self::Middleware => &[],
-            Self::RequestLifecycle | Self::WebSocketObserver | Self::Usage => &[Stage::Observation],
+            Self::UpstreamAdapter => &[Stage::Upstream],
+            Self::Observer => &[Stage::Observation],
             Self::CommandLine => &[Stage::CommandLine],
             Self::Management => &[Stage::Management],
+            Self::Maintenance => &[Stage::Maintenance],
         }
     }
 }
 
-/// 调用阶段由宿主签发，插件不能通过方法参数提升阶段。
+/// 调用阶段描述当前处理器位置，不限定插件访问宿主资源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stage {
@@ -65,13 +85,21 @@ pub enum Stage {
     Routing,
     Scheduling,
     Retry,
+    Http,
+    Service,
+    #[serde(rename = "websocket")]
+    WebSocket,
     Request,
     Attempt,
+    /// Core 登记已选账号的 attempt 后才启动的受管上游执行。
+    Upstream,
     Observation,
     Management,
     CommandLine,
-    /// 公共登录回调不继承插件实例的任何宿主回调权限。
+    /// 未登录客户端触发的插件管理调用。
     PublicManagement,
+    /// 宿主针对已发布实例签发的幂等维护调用。
+    Maintenance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,68 +160,4 @@ where
     }
 
     deserializer.deserialize_map(ContributionsVisitor)
-}
-
-/// 插件可访问的稳定资源域；动作与后续资源限制由接口合同表达，不编码在域名中。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Permission {
-    Network,
-    Models,
-    Accounts,
-    Data,
-    Requests,
-    PublicEndpoints,
-}
-
-impl Permission {
-    /// 当前公开访问域，安装摘要与授权校验复用同一集合。
-    pub const ALL: [Self; 6] = [
-        Self::Network,
-        Self::Models,
-        Self::Accounts,
-        Self::Data,
-        Self::Requests,
-        Self::PublicEndpoints,
-    ];
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Network => "network",
-            Self::Models => "models",
-            Self::Accounts => "accounts",
-            Self::Data => "data",
-            Self::Requests => "requests",
-            Self::PublicEndpoints => "public_endpoints",
-        }
-    }
-
-    /// 安装摘要显示名。
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Network => "联网",
-            Self::Models => "模型调用",
-            Self::Accounts => "账号与凭据",
-            Self::Data => "基础数据",
-            Self::Requests => "请求处理",
-            Self::PublicEndpoints => "公开入口",
-        }
-    }
-
-    /// 面向安装确认的访问含义；账号域明确包含原始凭据和修改权限。
-    #[must_use]
-    pub const fn description(self) -> &'static str {
-        match self {
-            Self::Network => "访问网络",
-            Self::Models => "查询模型与 API Key 信息并调用模型，可能产生消耗",
-            Self::Accounts => "读取和修改账号，包括访问原始凭据",
-            Self::Data => {
-                "在管理或命令入口只读查询所有账号的基础信息与已有额度观测，不包含凭据或修改权限"
-            }
-            Self::Requests => "查看和处理请求、响应、路由及账号选择",
-            Self::PublicEndpoints => "提供无需登录即可访问的资源与回调入口",
-        }
-    }
 }
